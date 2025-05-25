@@ -667,107 +667,64 @@
 	const containerPadding = 8; // 容器左右内边距（对应 px-2 = 8px）
 	const topGap = 8; // 顶部间距，确保第一行也有间距
 
-	// 批量更新队列
-	const pendingUpdates = ref<Set<number>>(new Set());
-	let batchUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+	// 🔒 位置锁定机制：跟踪修正状态
+	const hasBeenCorrected = ref<Record<number, boolean>>({});
 
-	// 设置卡片引用
+	// 🔒 设置卡片引用 - 唯一修正入口
 	const setCardRef = (el: HTMLElement, index: number) => {
 		cardRefs.value.set(index, el);
 
-		// 更新实际高度缓存
+		// 🔒 确保只修正一次
+		if (hasBeenCorrected.value[index]) {
+			return; // 已修正过，不再修正
+		}
+
+		// 获取实际高度
 		const actualHeight = el.offsetHeight;
 		const estimatedHeight = cardHeightsCache.value[index];
 		const diff = Math.abs(actualHeight - estimatedHeight);
 
-		// 🎯 优化：如果高度差异较大，加入批量更新队列
-		if (diff > 10) {
-			pendingUpdates.value.add(index);
-			scheduleBatchUpdate();
-		}
+		// 🎯 一次性修正：只在首次设置ref且差异较大时修正
+		if (diff > 15) {
+			// 标记已修正，防止重复修正
+			hasBeenCorrected.value[index] = true;
 
-		// 立即缓存实际高度
-		cardHeightsCache.value[index] = actualHeight;
+			// 更新高度缓存
+			cardHeightsCache.value[index] = actualHeight;
+
+			// 只调整Y坐标，不重新计算位置
+			adjustPositionsOnly(index, actualHeight - estimatedHeight);
+		} else {
+			// 小差异直接更新高度缓存
+			cardHeightsCache.value[index] = actualHeight;
+		}
 	};
 
-	// 🚀 批量更新调度器
-	const scheduleBatchUpdate = () => {
-		if (batchUpdateTimer) {
-			clearTimeout(batchUpdateTimer);
-		}
+	// 🔒 位置调整函数 - 只调整Y坐标，不重新计算位置
+	const adjustPositionsOnly = (changedIndex: number, heightDiff: number) => {
+		const changedPosition = cardPositionsCache.value[changedIndex];
+		if (!changedPosition) return;
 
-		// 延迟50ms批量处理，避免频繁更新
-		batchUpdateTimer = setTimeout(() => {
-			processBatchUpdates();
-			batchUpdateTimer = null;
-		}, 50);
-	};
-
-	// 🚀 批量处理高度更新
-	const processBatchUpdates = () => {
-		if (pendingUpdates.value.size === 0) return;
-
-		// 按索引排序，从前往后处理
-		const sortedIndexes = Array.from(pendingUpdates.value).sort(
-			(a, b) => a - b
+		const changedColumn = Math.round(
+			changedPosition.x / (getCardWidth() + gap)
 		);
 
-		// 记录每列的累积调整
-		const columnAdjustments = new Array(getColumnCount()).fill(0);
-
-		for (const index of sortedIndexes) {
-			const estimatedHeight = getEstimatedCardHeight(index);
-			const actualHeight = cardHeightsCache.value[index];
-			const heightDiff = actualHeight - estimatedHeight;
-
-			if (Math.abs(heightDiff) > 10) {
-				const position = cardPositionsCache.value[index];
-				if (position) {
-					const columnIndex = Math.round(position.x / (getCardWidth() + gap));
-
-					// 累积该列的调整量
-					columnAdjustments[columnIndex] += heightDiff;
-
-					// 调整同列后续卡片的位置
-					adjustSubsequentCardsInColumn(columnIndex, index, heightDiff);
+		// 🎯 只调整Y坐标，不重新计算位置
+		for (let i = changedIndex + 1; i < displayCards.value.length; i++) {
+			const position = cardPositionsCache.value[i];
+			if (position) {
+				const cardColumn = Math.round(position.x / (getCardWidth() + gap));
+				if (cardColumn === changedColumn && position.y > changedPosition.y) {
+					// ✅ 只调整Y坐标，保持X坐标和列选择不变
+					position.y += heightDiff;
+					cardPositionsCache.value[i] = { ...position };
 				}
 			}
 		}
 
 		// 更新列高度
-		for (let i = 0; i < columnAdjustments.length; i++) {
-			if (columnAdjustments[i] !== 0) {
-				columnHeights.value[i] += columnAdjustments[i];
-			}
-		}
-
-		// 清空队列
-		pendingUpdates.value.clear();
+		columnHeights.value[changedColumn] += heightDiff;
 		updateTotalHeight();
-	};
-
-	// 🎯 调整同列后续卡片位置
-	const adjustSubsequentCardsInColumn = (
-		columnIndex: number,
-		fromIndex: number,
-		heightDiff: number
-	) => {
-		const fromPosition = cardPositionsCache.value[fromIndex];
-		if (!fromPosition) return;
-
-		let adjustedCount = 0;
-		for (let i = fromIndex + 1; i < displayCards.value.length; i++) {
-			const position = cardPositionsCache.value[i];
-			if (position) {
-				const cardColumn = Math.round(position.x / (getCardWidth() + gap));
-
-				if (cardColumn === columnIndex && position.y > fromPosition.y) {
-					position.y += heightDiff;
-					cardPositionsCache.value[i] = { ...position };
-					adjustedCount++;
-				}
-			}
-		}
 	};
 
 	// 计算列数
@@ -926,9 +883,10 @@
 		img.src = imageUrl;
 	};
 
-	// 从指定索引开始重新计算卡片位置
+	// 🔒 限制使用：从指定索引开始重新计算卡片位置
+	// 只在以下情况使用：1. 窗口大小变化 2. 数据刷新 3. 图片宽高比初始化时发现差异巨大
 	const recalculateFromIndex = (startIndex: number) => {
-		console.log("重新计算卡片位置", startIndex);
+		console.log("🔒 重新计算卡片位置（限制使用）", startIndex);
 		// 确保容器已准备好
 		if (!container.value) {
 			console.warn("Container not ready for recalculation");
@@ -965,22 +923,24 @@
 
 		columnHeights.value = newColumnHeights;
 
-		// 重新计算从 startIndex 开始的所有卡片位置
+		// 🔒 重新计算从 startIndex 开始的所有卡片位置（清除锁定状态）
 		for (let i = startIndex; i < displayCards.value.length; i++) {
-			// 清除旧位置
+			// 清除旧位置和修正状态
 			cardPositionsCache.value[i] = undefined as any;
+			hasBeenCorrected.value[i] = false; // 重置修正状态
 			calculateCardPosition(i);
 		}
 
 		updateTotalHeight();
 	};
 
-	// 计算单个卡片位置（一旦计算就缓存）
+	// 🔒 计算单个卡片位置（一旦计算就永久锁定）
 	const calculateCardPosition = (index: number) => {
-		console.log("计算卡片位置", index);
+		console.log("🔒 计算卡片位置", index);
+		// 🔒 强化锁定检查
 		if (cardPositionsCache.value[index]) {
-			console.log("已经计算过，不再改变", index);
-			return; // 已经计算过，不再改变
+			console.log("🔒 已锁定，绝不重新计算", index);
+			return; // 已锁定，绝不重新计算
 		}
 
 		// 确保容器已准备好
@@ -1037,7 +997,7 @@
 			return;
 		}
 
-		// 缓存位置（不再改变）
+		// 🔒 一旦计算就永久锁定
 		cardPositionsCache.value[index] = {
 			x,
 			y,
@@ -1055,16 +1015,17 @@
 		updateTotalHeight();
 	};
 
-	// 瀑布流布局算法 - 重新计算所有位置（仅在窗口大小变化时调用）
+	// 🔒 瀑布流布局算法 - 重新计算所有位置（仅在窗口大小变化时调用）
 	const layoutCards = async () => {
 		if (!container.value) return;
 
 		await nextTick();
 
-		// 清空缓存，重新计算
+		// 🔒 清空缓存，重新计算（重置修正状态）
 		cardPositionsCache.value = [];
 		cardHeightsCache.value = [];
 		columnHeights.value = [];
+		hasBeenCorrected.value = {}; // 重置修正状态
 
 		// 为所有显示的卡片计算位置
 		for (let i = 0; i < displayCards.value.length; i++) {
@@ -1112,73 +1073,16 @@
 		return breakdown;
 	};
 
-	// 图片加载完成后更新高度（现在主要用于验证预估准确性）
+	// 🔒 图片加载完成后仅标记状态（不再进行位置修正）
 	const onImageLoad = (index: number) => {
 		// 标记图片已加载
 		imageLoadedStates.value[index] = true;
 
+		// 🔒 移除位置修正逻辑，修正统一在setCardRef中进行
 		setTimeout(() => {
-			const cardEl = cardRefs.value.get(index);
-			if (cardEl) {
-				const actualHeight = cardEl.offsetHeight;
-				const estimatedHeight = cardHeightsCache.value[index];
-				const diff = Math.abs(actualHeight - estimatedHeight);
-
-				// 分析前3个卡片的高度组成
-				if (index < 3) {
-					analyzeActualHeight(cardEl, index);
-				}
-
-				// 🎯 优化：使用智能局部更新替代全量重新计算
-				if (diff > 1) {
-					// 更新实际高度
-					cardHeightsCache.value[index] = actualHeight;
-
-					// 🚀 关键优化：只更新受影响的卡片，而不是重新计算所有
-					updateAffectedCardsOnly(index, diff);
-				} else {
-					cardHeightsCache.value[index] = actualHeight;
-					updateTotalHeight();
-				}
-				// 检查是否需要加载更多
-				checkIfNeedLoadMore();
-			}
+			// 检查是否需要加载更多
+			checkIfNeedLoadMore();
 		}, 10);
-	};
-
-	// 🚀 新增：智能局部更新函数
-	const updateAffectedCardsOnly = (
-		changedIndex: number,
-		heightDiff: number
-	) => {
-		const changedPosition = cardPositionsCache.value[changedIndex];
-		if (!changedPosition) return;
-
-		// 计算受影响的列
-		const changedColumn = Math.round(
-			changedPosition.x / (getCardWidth() + gap)
-		);
-
-		// 更新该列的高度
-		columnHeights.value[changedColumn] += heightDiff;
-
-		// 🎯 关键：只调整同列且位置在后面的卡片
-		let affectedCount = 0;
-		for (let i = changedIndex + 1; i < displayCards.value.length; i++) {
-			const position = cardPositionsCache.value[i];
-			if (position) {
-				const cardColumn = Math.round(position.x / (getCardWidth() + gap));
-
-				// 只调整同列且Y坐标大于修正点的卡片
-				if (cardColumn === changedColumn && position.y > changedPosition.y) {
-					position.y += heightDiff;
-					cardPositionsCache.value[i] = { ...position };
-					affectedCount++;
-				}
-			}
-		}
-
-		updateTotalHeight();
 	};
 
 	// 防抖的窗口大小变化处理
@@ -1290,7 +1194,7 @@
 			})) as any;
 
 			if (refreshList && refreshList.data) {
-				// 重置状态
+				// 🔒 重置状态（包括修正状态）
 				currentPage.value = 1;
 				hasMore.value = true;
 				cardRefs.value.clear();
@@ -1299,6 +1203,7 @@
 				columnHeights.value = [];
 				imageAspectRatios.value = [];
 				imageLoadedStates.value = {}; // 重置图片加载状态
+				hasBeenCorrected.value = {}; // 🔒 重置修正状态
 				scrollTop.value = 0;
 				totalContentHeight.value = 0;
 
@@ -1492,18 +1397,13 @@
 				cancelAnimationFrame(rafId);
 				rafId = null;
 			}
-
-			// 清理批量更新定时器
-			if (batchUpdateTimer) {
-				clearTimeout(batchUpdateTimer);
-				batchUpdateTimer = null;
-			}
 		}
 
 		// 清理缓存（可选，帮助垃圾回收）
 		cardRefs.value.clear();
 		visibleCardsCache.value = [];
-		pendingUpdates.value.clear();
+		// 🔒 重置修正状态
+		hasBeenCorrected.value = {};
 	});
 </script>
 
