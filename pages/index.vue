@@ -71,15 +71,35 @@
 					>
 						<!-- 图片容器 -->
 						<div class="relative">
-							<!-- 封面图片 -->
-							<img
-								:src="card.img"
-								class="w-full transition-opacity duration-300"
-								:class="{ 'opacity-0': playingVideos[card.id] }"
+							<!-- 图片占位容器 - 使用API尺寸预先设置高度 -->
+							<div
+								class="w-full bg-gray-100 relative flex items-center justify-center"
 								:style="{ height: getImageHeight(card.originalIndex) + 'px' }"
-								:alt="card.title"
-								@load="onImageLoad(card.originalIndex)"
-							/>
+							>
+								<!-- 加载指示器 -->
+								<div
+									v-if="!imageLoadedStates[card.originalIndex]"
+									class="absolute inset-0 flex items-center justify-center bg-gray-100"
+								>
+									<div class="animate-pulse flex space-x-1">
+										<div class="w-2 h-2 bg-gray-300 rounded-full"></div>
+										<div class="w-2 h-2 bg-gray-300 rounded-full"></div>
+										<div class="w-2 h-2 bg-gray-300 rounded-full"></div>
+									</div>
+								</div>
+
+								<!-- 封面图片 -->
+								<img
+									:src="card.img"
+									class="w-full h-full object-cover transition-opacity duration-300"
+									:class="{
+										'opacity-0': playingVideos[card.id],
+										'opacity-100': imageLoadedStates[card.originalIndex],
+									}"
+									:alt="card.title"
+									@load="onImageLoad(card.originalIndex)"
+								/>
+							</div>
 
 							<!-- 视频元素 - 仅对video类型显示 -->
 							<video
@@ -249,7 +269,6 @@
 
 	// 数据转换函数
 	const transformApiData = (apiData: any[]) => {
-		like;
 		return apiData.map((item: any) => ({
 			id: item.id,
 			img: `${item.cover.url}`,
@@ -260,6 +279,9 @@
 			like: item.like || 0,
 			type: item.type || "image",
 			videoUrl: item.video ? `${item.video.url}` : undefined,
+			// 新增：从API获取图片尺寸
+			coverWidth: item.cover?.width || 0,
+			coverHeight: item.cover?.height || 0,
 		}));
 	};
 	const route = useRoute();
@@ -287,9 +309,10 @@
 	const startY = ref(0);
 	const scrollTop = ref(0);
 	const viewportHeight = ref(0);
-	const bufferHeight = ref(200); // 缓冲区高度
+	const bufferHeight = ref(300); // 缓冲区高度
 	const playingVideos = ref<Record<number, boolean>>({});
 	const isUserScrolling = ref(false); // 新增：用于判断用户是否在滚动
+	const imageLoadedStates = ref<Record<number, boolean>>({}); // 图片加载状态
 
 	// 视频模态框相关
 	const showVideoModal = ref(false);
@@ -370,10 +393,22 @@
 		cardRefs.value.set(index, el);
 		// 更新实际高度缓存
 		const actualHeight = el.offsetHeight;
-		if (cardHeightsCache.value[index] !== actualHeight) {
+		const estimatedHeight =
+			cardHeightsCache.value[index] || getEstimatedCardHeight(index);
+
+		// 只有当实际高度与预估高度差异超过阈值时才重新计算
+		if (Math.abs(actualHeight - estimatedHeight) > 10) {
+			console.log(
+				`Card ${index}: estimated ${estimatedHeight}px, actual ${actualHeight}px, diff ${Math.abs(
+					actualHeight - estimatedHeight
+				)}px`
+			);
 			cardHeightsCache.value[index] = actualHeight;
 			// 高度发生变化时，重新计算后续卡片位置
 			recalculateFromIndex(index + 1);
+		} else {
+			// 高度差异很小，直接更新缓存即可
+			cardHeightsCache.value[index] = actualHeight;
 		}
 	};
 
@@ -397,6 +432,19 @@
 		return (containerWidth - gap * (columnCount - 1)) / columnCount;
 	};
 
+	// 初始化图片宽高比缓存（使用API返回的尺寸）
+	const initializeImageAspectRatios = () => {
+		allCards.value.forEach((card, index) => {
+			if (card.coverWidth && card.coverHeight) {
+				// 使用API返回的真实宽高比
+				imageAspectRatios.value[index] = card.coverWidth / card.coverHeight;
+			} else {
+				// 如果API没有返回尺寸，使用默认值
+				imageAspectRatios.value[index] = 1;
+			}
+		});
+	};
+
 	// 获取图片显示高度（根据宽高比计算）
 	const getImageHeight = (index: number) => {
 		const cardWidth = getCardWidth();
@@ -404,17 +452,57 @@
 		return cardWidth / aspectRatio;
 	};
 
-	// 预估卡片高度（用于未渲染的卡片）
+	// 精确计算卡片高度（使用API返回的图片尺寸）
 	const getEstimatedCardHeight = (index: number) => {
 		const card = displayCards.value[index];
 		if (!card) return 200;
 
-		const titleLines = Math.ceil(card.title.length / 20); // 估算标题行数
-		const imageHeight = getImageHeight(index);
-		return imageHeight + 16 + titleLines * 20 + 40 + 32; // 图片+间距+标题+描述+底部信息+padding
+		const cardWidth = getCardWidth();
+
+		// 使用API返回的图片尺寸计算精确高度
+		let imageHeight = 200; // 默认高度
+		if (card.coverWidth && card.coverHeight) {
+			const aspectRatio = card.coverWidth / card.coverHeight;
+			imageHeight = cardWidth / aspectRatio;
+		} else if (imageAspectRatios.value[index]) {
+			imageHeight = cardWidth / imageAspectRatios.value[index];
+		}
+
+		// 更精确的标题高度计算
+		const charsPerLine = Math.floor(cardWidth / 12); // 假设字符宽度12px
+		const titleLines = Math.ceil(card.title.length / charsPerLine);
+		const titleHeight = titleLines * 22; // 行高22px
+
+		// 分类标签高度
+		const categoryHeight = 28;
+
+		// 用户信息区域高度
+		const userInfoHeight = 32;
+
+		// 卡片内边距
+		const cardPadding = 24;
+
+		return Math.round(
+			imageHeight + titleHeight + categoryHeight + userInfoHeight + cardPadding
+		);
 	};
 
-	// 预加载图片获取宽高比
+	// 初始化图片宽高比（优先使用API数据，fallback到图片加载）
+	const initializeImageAspectRatio = (card: any, index: number) => {
+		// 优先使用API返回的尺寸
+		if (card.coverWidth && card.coverHeight) {
+			imageAspectRatios.value[index] = card.coverWidth / card.coverHeight;
+			// 直接计算位置，无需等待图片加载
+			if (!cardPositionsCache.value[index]) {
+				calculateCardPosition(index);
+			}
+		} else {
+			// 如果API没有尺寸信息，fallback到图片预加载
+			preloadImageAspectRatio(card.img, index);
+		}
+	};
+
+	// 预加载图片获取宽高比（仅在API没有尺寸时使用）
 	const preloadImageAspectRatio = (imageUrl: string, index: number) => {
 		const img = new Image();
 		img.onload = () => {
@@ -552,23 +640,29 @@
 		totalContentHeight.value = Math.max(...columnHeights.value);
 	};
 
-	// 图片加载完成后更新高度
+	// 图片加载完成后更新高度（现在主要用于验证预估准确性）
 	const onImageLoad = (index: number) => {
+		// 标记图片已加载
+		imageLoadedStates.value[index] = true;
+
 		setTimeout(() => {
 			const cardEl = cardRefs.value.get(index);
 			if (cardEl) {
 				const actualHeight = cardEl.offsetHeight;
 				const estimatedHeight = cardHeightsCache.value[index];
 
-				// 如果实际高度与预估高度差异较大，重新计算后续位置
-				if (Math.abs(actualHeight - estimatedHeight) > 5) {
+				// 由于使用了API尺寸，预估应该更准确，只在差异很大时才重新计算
+				if (Math.abs(actualHeight - estimatedHeight) > 15) {
+					console.log(
+						`Image loaded - Card ${index}: estimated ${estimatedHeight}px, actual ${actualHeight}px`
+					);
 					cardHeightsCache.value[index] = actualHeight;
 					recalculateFromIndex(index + 1);
 				} else {
 					cardHeightsCache.value[index] = actualHeight;
 					updateTotalHeight();
 				}
-				// 🔥 新增：图片加载后检查是否需要加载更多
+				// 检查是否需要加载更多
 				checkIfNeedLoadMore();
 			}
 		}, 10);
@@ -631,10 +725,9 @@
 				allCards.value.push(...newCards);
 				currentPage.value = nextPage;
 
-				// 为新加载的图片预加载宽高比和计算位置
+				// 为新加载的卡片初始化宽高比和计算位置
 				for (let i = oldLength; i < allCards.value.length; i++) {
-					preloadImageAspectRatio(allCards.value[i].img, i);
-					calculateCardPosition(i);
+					initializeImageAspectRatio(allCards.value[i], i);
 				}
 			} else {
 				hasMore.value = false;
@@ -669,15 +762,16 @@
 				cardHeightsCache.value = [];
 				columnHeights.value = [];
 				imageAspectRatios.value = [];
+				imageLoadedStates.value = {}; // 重置图片加载状态
 				scrollTop.value = 0;
 				totalContentHeight.value = 0;
 
 				// 更新数据
 				allCards.value = transformApiData(refreshData);
 
-				// 重新预加载图片和计算位置
+				// 重新初始化图片宽高比和计算位置
 				displayCards.value.forEach((card, index) => {
-					preloadImageAspectRatio(card.img, index);
+					initializeImageAspectRatio(card, index);
 				});
 
 				// 重新布局
@@ -777,9 +871,9 @@
 		// 初始化视口高度
 		viewportHeight.value = window.innerHeight;
 
-		// 预加载所有初始图片获取宽高比
+		// 初始化所有卡片的图片宽高比
 		displayCards.value.forEach((card, index) => {
-			preloadImageAspectRatio(card.img, index);
+			initializeImageAspectRatio(card, index);
 		});
 
 		layoutCards();

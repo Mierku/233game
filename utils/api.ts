@@ -9,7 +9,7 @@ interface ListResponse {
 		avatar: { url: string };
 	};
 	like: number;
-	cover: { url: string };
+	cover: { url: string; width: number; height: number };
 	video?: { url: string };
 	categories: { name: string }[];
 }
