@@ -350,6 +350,11 @@
 		const cards = displayCards.value;
 		const visible: any[] = [];
 
+		// 如果没有卡片或容器未准备好，返回空数组
+		if (cards.length === 0 || !container.value) {
+			return visible;
+		}
+
 		// 计算可视区域
 		const viewTop = scrollTop.value - bufferHeight.value;
 		const viewBottom =
@@ -357,7 +362,17 @@
 
 		for (let i = 0; i < cards.length; i++) {
 			const position = cardPositionsCache.value[i];
-			if (!position) continue;
+
+			// 如果位置未计算，尝试计算（但不阻塞渲染）
+			if (!position) {
+				// 异步计算位置，避免阻塞当前渲染
+				nextTick(() => {
+					if (!cardPositionsCache.value[i] && container.value) {
+						calculateCardPosition(i);
+					}
+				});
+				continue;
+			}
 
 			const cardTop = position.y;
 			const cardHeight = cardHeightsCache.value[i] || getEstimatedCardHeight(i);
@@ -455,23 +470,43 @@
 	// 精确计算卡片高度（使用API返回的图片尺寸）
 	const getEstimatedCardHeight = (index: number) => {
 		const card = displayCards.value[index];
-		if (!card) return 200;
+		if (!card) {
+			console.warn(`Card not found at index ${index}`);
+			return 200;
+		}
 
 		const cardWidth = getCardWidth();
 
+		// 如果容器未准备好，返回默认高度
+		if (cardWidth <= 0) {
+			console.warn(`Invalid card width ${cardWidth} for height calculation`);
+			return 200;
+		}
+
 		// 使用API返回的图片尺寸计算精确高度
 		let imageHeight = 200; // 默认高度
-		if (card.coverWidth && card.coverHeight) {
+		if (
+			card.coverWidth &&
+			card.coverHeight &&
+			card.coverWidth > 0 &&
+			card.coverHeight > 0
+		) {
 			const aspectRatio = card.coverWidth / card.coverHeight;
 			imageHeight = cardWidth / aspectRatio;
-		} else if (imageAspectRatios.value[index]) {
+		} else if (
+			imageAspectRatios.value[index] &&
+			imageAspectRatios.value[index] > 0
+		) {
 			imageHeight = cardWidth / imageAspectRatios.value[index];
 		}
 
+		// 确保图片高度合理
+		imageHeight = Math.max(100, Math.min(imageHeight, cardWidth * 2)); // 限制在100px到2倍宽度之间
+
 		// 更精确的标题高度计算
-		const charsPerLine = Math.floor(cardWidth / 12); // 假设字符宽度12px
-		const titleLines = Math.ceil(card.title.length / charsPerLine);
-		const titleHeight = titleLines * 22; // 行高22px
+		const charsPerLine = Math.max(1, Math.floor(cardWidth / 12)); // 确保至少1个字符每行
+		const titleLines = Math.ceil((card.title?.length || 0) / charsPerLine);
+		const titleHeight = Math.max(22, titleLines * 22); // 至少一行高度
 
 		// 分类标签高度
 		const categoryHeight = 28;
@@ -482,22 +517,36 @@
 		// 卡片内边距
 		const cardPadding = 24;
 
-		return Math.round(
+		const totalHeight = Math.round(
 			imageHeight + titleHeight + categoryHeight + userInfoHeight + cardPadding
 		);
+
+		// 确保返回合理的高度
+		return Math.max(150, totalHeight); // 最小高度150px
 	};
 
 	// 初始化图片宽高比（优先使用API数据，fallback到图片加载）
 	const initializeImageAspectRatio = (card: any, index: number) => {
 		// 优先使用API返回的尺寸
-		if (card.coverWidth && card.coverHeight) {
-			imageAspectRatios.value[index] = card.coverWidth / card.coverHeight;
-			// 直接计算位置，无需等待图片加载
-			if (!cardPositionsCache.value[index]) {
-				calculateCardPosition(index);
-			}
+		if (
+			card.coverWidth &&
+			card.coverHeight &&
+			card.coverWidth > 0 &&
+			card.coverHeight > 0
+		) {
+			const aspectRatio = card.coverWidth / card.coverHeight;
+			// 确保宽高比合理（防止极端值）
+			imageAspectRatios.value[index] = Math.max(0.1, Math.min(aspectRatio, 10));
+
+			// 延迟计算位置，确保容器已准备好
+			nextTick(() => {
+				if (!cardPositionsCache.value[index] && container.value) {
+					calculateCardPosition(index);
+				}
+			});
 		} else {
-			// 如果API没有尺寸信息，fallback到图片预加载
+			// 如果API没有尺寸信息，设置默认值并fallback到图片预加载
+			imageAspectRatios.value[index] = 1; // 默认正方形
 			preloadImageAspectRatio(card.img, index);
 		}
 	};
@@ -521,22 +570,37 @@
 
 	// 从指定索引开始重新计算卡片位置
 	const recalculateFromIndex = (startIndex: number) => {
+		// 确保容器已准备好
+		if (!container.value) {
+			console.warn("Container not ready for recalculation");
+			return;
+		}
+
 		// 重置列高度到 startIndex 之前的状态
 		const columnCount = getColumnCount();
+		const cardWidth = getCardWidth();
+
+		if (cardWidth <= 0) {
+			console.warn("Invalid card width for recalculation");
+			return;
+		}
+
 		const newColumnHeights = new Array(columnCount).fill(0);
 
 		// 重新计算列高度到 startIndex 位置
 		for (let i = 0; i < startIndex; i++) {
 			const position = cardPositionsCache.value[i];
 			if (position) {
-				const cardWidth = getCardWidth();
 				const columnIndex = Math.round(position.x / (cardWidth + gap));
-				const cardHeight =
-					cardHeightsCache.value[i] || getEstimatedCardHeight(i);
-				newColumnHeights[columnIndex] = Math.max(
-					newColumnHeights[columnIndex],
-					position.y + cardHeight + gap
-				);
+				// 确保列索引有效
+				if (columnIndex >= 0 && columnIndex < columnCount) {
+					const cardHeight =
+						cardHeightsCache.value[i] || getEstimatedCardHeight(i);
+					newColumnHeights[columnIndex] = Math.max(
+						newColumnHeights[columnIndex],
+						position.y + cardHeight + gap
+					);
+				}
 			}
 		}
 
@@ -545,9 +609,7 @@
 		// 重新计算从 startIndex 开始的所有卡片位置
 		for (let i = startIndex; i < displayCards.value.length; i++) {
 			// 清除旧位置
-			if (cardPositionsCache.value[i]) {
-				cardPositionsCache.value[i] = undefined as any;
-			}
+			cardPositionsCache.value[i] = undefined as any;
 			calculateCardPosition(i);
 		}
 
@@ -560,10 +622,22 @@
 			return; // 已经计算过，不再改变
 		}
 
+		// 确保容器已准备好
+		if (!container.value) {
+			console.warn(`Container not ready for card ${index}`);
+			return;
+		}
+
 		const columnCount = getColumnCount();
 		const cardWidth = getCardWidth();
 
-		// 如果列高度缓存不存在，重新计算
+		// 确保卡片宽度有效
+		if (cardWidth <= 0) {
+			console.warn(`Invalid card width ${cardWidth} for card ${index}`);
+			return;
+		}
+
+		// 如果列高度缓存不存在或列数发生变化，重新初始化
 		if (columnHeights.value.length !== columnCount) {
 			columnHeights.value = new Array(columnCount).fill(0);
 
@@ -571,13 +645,17 @@
 			for (let i = 0; i < index; i++) {
 				const position = cardPositionsCache.value[i];
 				if (position) {
+					// 使用当前的cardWidth重新计算列索引
 					const columnIndex = Math.round(position.x / (cardWidth + gap));
-					const cardHeight =
-						cardHeightsCache.value[i] || getEstimatedCardHeight(i);
-					columnHeights.value[columnIndex] = Math.max(
-						columnHeights.value[columnIndex],
-						position.y + cardHeight + gap
-					);
+					// 确保列索引有效
+					if (columnIndex >= 0 && columnIndex < columnCount) {
+						const cardHeight =
+							cardHeightsCache.value[i] || getEstimatedCardHeight(i);
+						columnHeights.value[columnIndex] = Math.max(
+							columnHeights.value[columnIndex],
+							position.y + cardHeight + gap
+						);
+					}
 				}
 			}
 		}
@@ -587,9 +665,16 @@
 			Math.min(...columnHeights.value)
 		);
 
-		// 计算卡片位置 - 移除padding，从x=0开始
+		// 计算卡片位置
 		const x = shortestColumnIndex * (cardWidth + gap);
 		const y = columnHeights.value[shortestColumnIndex];
+
+		// 预估高度并缓存
+		const cardHeight = getEstimatedCardHeight(index);
+		if (cardHeight <= 0) {
+			console.warn(`Invalid card height ${cardHeight} for card ${index}`);
+			return;
+		}
 
 		// 缓存位置（不再改变）
 		cardPositionsCache.value[index] = {
@@ -598,9 +683,7 @@
 			width: `${cardWidth}px`,
 		};
 
-		// 预估高度并缓存
-		const cardHeight =
-			cardHeightsCache.value[index] || getEstimatedCardHeight(index);
+		// 缓存高度
 		if (!cardHeightsCache.value[index]) {
 			cardHeightsCache.value[index] = cardHeight;
 		}
@@ -871,18 +954,41 @@
 		// 初始化视口高度
 		viewportHeight.value = window.innerHeight;
 
-		// 初始化所有卡片的图片宽高比
-		displayCards.value.forEach((card, index) => {
-			initializeImageAspectRatio(card, index);
+		// 等待容器准备好后再初始化
+		nextTick(() => {
+			if (container.value) {
+				// 先初始化所有卡片的图片宽高比（不立即计算位置）
+				displayCards.value.forEach((card, index) => {
+					if (
+						card.coverWidth &&
+						card.coverHeight &&
+						card.coverWidth > 0 &&
+						card.coverHeight > 0
+					) {
+						const aspectRatio = card.coverWidth / card.coverHeight;
+						imageAspectRatios.value[index] = Math.max(
+							0.1,
+							Math.min(aspectRatio, 10)
+						);
+					} else {
+						imageAspectRatios.value[index] = 1;
+						// 异步预加载图片
+						preloadImageAspectRatio(card.img, index);
+					}
+				});
+
+				// 然后统一计算布局
+				layoutCards();
+
+				// 最后检查是否需要加载更多
+				setTimeout(() => {
+					checkIfNeedLoadMore();
+				}, 100);
+			}
 		});
 
-		layoutCards();
 		window.addEventListener("resize", debouncedResize);
 		window.addEventListener("scroll", updateScrollTop);
-		// 🔥 新增：初始化后检查是否需要加载更多
-		setTimeout(() => {
-			checkIfNeedLoadMore();
-		}, 500);
 	});
 
 	onUnmounted(() => {
