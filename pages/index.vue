@@ -1,5 +1,55 @@
 <template>
-	<div class="bg-gray-100 min-h-screen pb-16">
+	<div
+		class="bg-gray-100 min-h-screen pb-16"
+		@touchstart="onTouchStart"
+		@touchmove="onTouchMove"
+		@touchend="onTouchEnd"
+	>
+		<!-- 下拉刷新指示器 - 圆形logo -->
+		<div
+			v-if="showPullRefresh"
+			class="fixed top-0 left-0 right-0 z-20 shadow-sm"
+			:style="{ transform: `translateY(${Math.max(0, pullDistance - 80)}px)` }"
+		>
+			<div class="flex items-center justify-center py-4">
+				<div
+					v-if="isRefreshing"
+					class="animate-spin rounded-full h-8 w-8 border-2 border-pink-500 border-t-transparent"
+				></div>
+				<div
+					v-else
+					class="rounded-full h-8 w-8 bg-gradient-to-r from-pink-400 to-pink-600 flex items-center justify-center text-white text-sm font-bold"
+				>
+					{{ pullDistance > 80 ? "↑" : "↓" }}
+				</div>
+				<span class="ml-2 text-sm text-gray-500">
+					{{ pullDistance > 80 ? "松开刷新" : "下拉刷新" }}
+				</span>
+			</div>
+		</div>
+
+		<!-- 顶部导航栏 -->
+		<header
+			class="sticky top-0 z-10 bg-white flex items-center px-4 py-2 shadow-sm"
+		>
+			<span class="text-lg font-bold text-pink-500 mr-2">发现</span>
+			<span class="text-gray-400 text-base">| 游戏圈</span>
+			<span class="ml-auto text-xs text-gray-400">糯花酿圈</span>
+			<svg
+				class="w-6 h-6 ml-2 text-gray-400"
+				fill="none"
+				stroke="currentColor"
+				stroke-width="2"
+				viewBox="0 0 24 24"
+			>
+				<path
+					stroke-linecap="round"
+					stroke-linejoin="round"
+					d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"
+				/>
+			</svg>
+		</header>
+
 		<!-- 虚拟瀑布流容器 -->
 		<div class="flex justify-center">
 			<div ref="container" class="relative px-2 mt-2 max-w-6xl w-full">
@@ -282,7 +332,7 @@
 	const startY = ref(0);
 	const scrollTop = ref(0);
 	const viewportHeight = ref(0);
-	const bufferHeight = ref(300); // 缓冲区高度
+	const bufferHeight = ref(600); // 🔧 移动端优化：增大缓冲区高度，减少计算频率
 	const playingVideos = ref<Record<number, boolean>>({});
 	const isUserScrolling = ref(false); // 新增：用于判断用户是否在滚动
 	const imageLoadedStates = ref<Record<number, boolean>>({}); // 图片加载状态
@@ -292,31 +342,12 @@
 	const currentVideoData = ref<any>(null);
 	const modalVideoRef = ref<HTMLVideoElement | null>(null);
 
-	// 📱 设备检测
-	const isMobile = import.meta.client
-		? /Android|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
-				navigator.userAgent
-		  )
-		: false;
-
 	// 防抖函数
 	const debounce = (func: Function, delay: number) => {
 		let timeoutId: ReturnType<typeof setTimeout>;
 		return (...args: any[]) => {
 			clearTimeout(timeoutId);
 			timeoutId = setTimeout(() => func.apply(null, args), delay);
-		};
-	};
-
-	// 📱 节流函数（移动端专用）
-	const throttle = (func: Function, delay: number) => {
-		let lastCall = 0;
-		return (...args: any[]) => {
-			const now = Date.now();
-			if (now - lastCall >= delay) {
-				lastCall = now;
-				func.apply(null, args);
-			}
 		};
 	};
 
@@ -348,11 +379,18 @@
 	const lastScrollTop = ref(0);
 	const lastViewportHeight = ref(0);
 
-	// 使用 RAF 优化虚拟列表计算（仅客户端）
+	// 🔧 使用 RAF 优化虚拟列表计算（移动端防抖优化）
 	let rafId: number | null = null;
+	let lastRequestTime = 0;
 	const requestCalculateVisibleCards = () => {
 		if (import.meta.client) {
-			console.log("客户端请求计算可视卡片");
+			const now = performance.now();
+			// 🔧 移动端防抖：限制最小间隔100ms，避免过于频繁的计算
+			if (now - lastRequestTime < 100) {
+				return;
+			}
+			lastRequestTime = now;
+
 			if (rafId) return; // 避免重复请求
 			rafId = requestAnimationFrame(() => {
 				calculateVisibleCards();
@@ -516,20 +554,11 @@
 			totalCheckedCards++;
 			const position = cardPositionsCache.value[i];
 
-			// 如果位置未计算，跳过（避免阻塞渲染）
+			// 🔧 如果位置未计算，跳过（避免阻塞渲染和循环触发）
 			if (!position) {
 				skippedCards++;
-				// 标记需要计算位置的卡片，但不在这里计算
-				if (!cardPositionsCache.value[i]) {
-					// 延迟计算，避免阻塞
-					setTimeout(() => {
-						if (!cardPositionsCache.value[i] && container.value) {
-							calculateCardPosition(i);
-							// 重新计算可视卡片
-							requestCalculateVisibleCards();
-						}
-					}, 0);
-				}
+				// 🔧 移除异步计算，避免循环触发虚拟列表重新计算
+				// 位置计算应该在数据加载时完成，而不是在虚拟列表计算中
 				continue;
 			}
 
@@ -548,49 +577,20 @@
 			}
 		}
 
-		// 调试信息：检查虚拟列表计算结果
+		// 🔧 减少调试日志输出，避免影响移动端性能
 		if (import.meta.client && process.env.NODE_ENV === "development") {
-			if (performanceStats.value.calculateCount % 20 === 0) {
+			if (performanceStats.value.calculateCount % 100 === 0) {
+				// 从20次改为100次
 				console.log(`🔍 虚拟列表调试:`, {
 					滚动位置: scrollTop.value,
 					可视区域: `${viewTop} ~ ${viewBottom}`,
 					找到可视卡片: foundVisibleCards,
 					跳过未计算卡片: skippedCards,
-					总检查卡片: totalCheckedCards,
-					缓存位置数量: cardPositionsCache.value.filter((p) => p).length,
-					总卡片数量: cards.length,
+					计算频率: `${performanceStats.value.calculateCount}次`,
+					平均耗时: `${performanceStats.value.averageCalculateTime.toFixed(
+						2
+					)}ms`,
 				});
-
-				// 打印缺失的卡片信息（应该可见但未找到的）
-				const missingCards = [];
-				for (let i = 0; i < Math.min(cards.length, 50); i++) {
-					// 只检查前50张卡片
-					const position = cardPositionsCache.value[i];
-					if (position) {
-						const height = cardHeightsCache.value[i];
-						const cardBottom = position.y + height;
-						const shouldBeVisible =
-							cardBottom >= viewTop && position.y <= viewBottom;
-						const isInVisibleList = visible.some((v) => v.originalIndex === i);
-
-						if (shouldBeVisible && !isInVisibleList) {
-							missingCards.push({
-								index: i,
-								title: cards[i]?.title?.substring(0, 15) + "...",
-								position: `(${position.x}, ${position.y})`,
-								height: height,
-								range: `${position.y} ~ ${cardBottom}`,
-							});
-						}
-					}
-				}
-
-				if (missingCards.length > 0) {
-					console.warn(
-						`⚠️ 发现${missingCards.length}张应该可见但未显示的卡片:`,
-						missingCards
-					);
-				}
 			}
 		}
 
@@ -610,34 +610,19 @@
 		}
 	};
 
-	// 📱 移动端滚动状态检测
-	const isScrolling = ref(false);
-	const scrollVelocity = ref(0);
-	const lastScrollTime = ref(0);
-
-	// 虚拟列表：只渲染可视区域内的卡片
+	// 🔧 虚拟列表：只渲染可视区域内的卡片（移动端优化）
 	const visibleCards = computed(() => {
-		// 📱 移动端使用更大的滚动阈值，减少计算频率
-		const scrollThreshold = isMobile ? 30 : 5;
-		const scrollChanged =
-			Math.abs(scrollTop.value - lastScrollTop.value) > scrollThreshold;
+		// 🔧 移动端优化：提高滚动阈值，减少触发频率
+		const scrollChanged = Math.abs(scrollTop.value - lastScrollTop.value) > 50; // 从5px提高到50px
 		const viewportChanged =
 			Math.abs(viewportHeight.value - lastViewportHeight.value) > 10;
 
-		// 📱 移动端在高速滚动时减少计算
-		const isHighSpeedScrolling = isMobile && scrollVelocity.value > 2;
-
-		// 强制重新计算的条件
+		// 🔧 优化强制重新计算条件，避免频繁触发
 		const forceRecalculate =
 			visibleCardsCache.value.length === 0 || // 没有可视卡片
-			(scrollChanged &&
-				visibleCardsCache.value.length < 6 &&
-				!isHighSpeedScrolling); // 非高速滚动时才强制计算
+			(scrollChanged && visibleCardsCache.value.length < 3); // 从6个降低到3个，减少触发
 
-		if (
-			(scrollChanged || viewportChanged || forceRecalculate) &&
-			!isHighSpeedScrolling
-		) {
+		if (scrollChanged || viewportChanged || forceRecalculate) {
 			lastScrollTop.value = scrollTop.value;
 			lastViewportHeight.value = viewportHeight.value;
 			requestCalculateVisibleCards();
@@ -663,38 +648,21 @@
 			return; // 已修正过，不再修正
 		}
 
-		// 📱 移动端在滚动时不进行修正，避免抖动
-		if (isMobile && isScrolling.value) {
-			return;
-		}
-
 		// 获取实际高度
 		const actualHeight = el.offsetHeight;
 		const estimatedHeight = cardHeightsCache.value[index];
 		const diff = Math.abs(actualHeight - estimatedHeight);
 
-		// 📱 移动端使用更大的修正阈值
-		const correctionThreshold = isMobile ? 25 : 15;
-
 		// 🎯 一次性修正：只在首次设置ref且差异较大时修正
-		if (diff > correctionThreshold) {
+		if (diff > 15) {
 			// 标记已修正，防止重复修正
 			hasBeenCorrected.value[index] = true;
 
 			// 更新高度缓存
 			cardHeightsCache.value[index] = actualHeight;
 
-			// 📱 移动端延迟修正，避免滚动中的抖动
-			if (isMobile) {
-				setTimeout(() => {
-					if (!isScrolling.value) {
-						adjustPositionsOnly(index, actualHeight - estimatedHeight);
-					}
-				}, 100);
-			} else {
-				// PC端立即修正
-				adjustPositionsOnly(index, actualHeight - estimatedHeight);
-			}
+			// 只调整Y坐标，不重新计算位置
+			adjustPositionsOnly(index, actualHeight - estimatedHeight);
 		} else {
 			// 小差异直接更新高度缓存
 			cardHeightsCache.value[index] = actualHeight;
@@ -1086,24 +1054,13 @@
 		}, 10);
 	};
 
-	// 📱 移动端优化的窗口大小变化处理
-	const debouncedResize = debounce(
-		() => {
-			if (import.meta.client) {
-				viewportHeight.value = window.innerHeight;
-
-				// 📱 移动端延迟重新布局，避免频繁的方向切换导致的抖动
-				if (isMobile) {
-					setTimeout(() => {
-						layoutCards();
-					}, 200);
-				} else {
-					layoutCards(); // PC端立即重新计算
-				}
-			}
-		},
-		isMobile ? 500 : 300
-	); // 移动端更长的防抖时间
+	// 防抖的窗口大小变化处理
+	const debouncedResize = debounce(() => {
+		if (import.meta.client) {
+			viewportHeight.value = window.innerHeight;
+			layoutCards(); // 窗口大小变化时重新计算所有位置
+		}
+	}, 300);
 	// 检查是否需要加载更多数据（独立函数）
 	const checkIfNeedLoadMore = async () => {
 		if (
@@ -1146,62 +1103,16 @@
 		checkIfNeedLoadMore();
 	}, 16); // 约60fps
 
-	// 📱 移动端优化的滚动处理
+	// 立即更新滚动位置（用于虚拟列表），延迟处理其他逻辑
 	const handleScroll = () => {
-		if (!import.meta.client) return;
-
-		const now = Date.now();
-		const currentScrollTop =
-			window.pageYOffset || document.documentElement.scrollTop;
-
-		// 📱 计算滚动速度（移动端专用）
-		if (isMobile) {
-			const timeDiff = now - lastScrollTime.value;
-			const scrollDiff = Math.abs(currentScrollTop - scrollTop.value);
-
-			if (timeDiff > 0) {
-				scrollVelocity.value = scrollDiff / timeDiff;
-			}
-
-			// 设置滚动状态
-			isScrolling.value = true;
-
-			// 清除之前的滚动结束定时器
-			if (scrollEndTimer) {
-				clearTimeout(scrollEndTimer);
-			}
-
-			// 设置滚动结束检测
-			scrollEndTimer = setTimeout(
-				() => {
-					isScrolling.value = false;
-					scrollVelocity.value = 0;
-				},
-				isMobile ? 150 : 100
-			); // 移动端更长的滚动结束检测时间
-		}
-
-		// 立即更新滚动位置，确保虚拟列表响应及时
-		scrollTop.value = currentScrollTop;
-		lastScrollTime.value = now;
-
-		// 📱 移动端使用节流，PC端使用防抖
-		if (isMobile) {
-			throttledScrollHandler();
-		} else {
+		if (import.meta.client) {
+			// 立即更新滚动位置，确保虚拟列表响应及时
+			scrollTop.value =
+				window.pageYOffset || document.documentElement.scrollTop;
+			// 延迟处理其他逻辑
 			debouncedScrollHandler();
 		}
 	};
-
-	// 📱 移动端专用节流处理
-	let scrollEndTimer: ReturnType<typeof setTimeout> | null = null;
-	const throttledScrollHandler = throttle(
-		() => {
-			updateScrollTop();
-			checkIfNeedLoadMore();
-		},
-		isMobile ? 33 : 16
-	); // 移动端30fps，PC端60fps
 
 	// 加载更多数据
 	const loadMore = async () => {
@@ -1455,12 +1366,6 @@
 				cancelAnimationFrame(rafId);
 				rafId = null;
 			}
-
-			// 📱 清理移动端滚动定时器
-			if (scrollEndTimer) {
-				clearTimeout(scrollEndTimer);
-				scrollEndTimer = null;
-			}
 		}
 
 		// 清理缓存（可选，帮助垃圾回收）
@@ -1492,26 +1397,6 @@
 		min-width: 0;
 		min-height: 0;
 		flex-shrink: 1;
-	}
-
-	/* 📱 移动端滚动优化 */
-	@media (max-width: 768px) {
-		/* 启用硬件加速 */
-		.absolute {
-			will-change: transform;
-			transform: translate3d(0, 0, 0);
-		}
-
-		/* 优化触摸滚动 */
-		body {
-			-webkit-overflow-scrolling: touch;
-			overscroll-behavior: contain;
-		}
-
-		/* 减少重绘 */
-		.bg-white {
-			backface-visibility: hidden;
-		}
 	}
 
 	/* 针对不同屏幕比例优化 */
