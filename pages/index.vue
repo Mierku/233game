@@ -100,7 +100,7 @@
 							<!-- 视频预览按钮 -->
 							<div
 								v-if="card.type === 'video'"
-								class="absolute top-1 left-1 bg-black bg-opacity-30 rounded-full p-1 cursor-pointer hover:bg-opacity-50 transition-all z-10"
+								class="absolute top-2 left-2 bg-[rgba(0,0,0,0.7)] rounded-full p-1 cursor-pointer hover:bg-opacity-50 transition-all z-10"
 								:class="{
 									'opacity-0 pointer-events-none': playingVideos[card.id],
 								}"
@@ -139,17 +139,28 @@
 								</div>
 								<div class="flex items-center text-xs text-gray-400">
 									<svg
-										class="w-4 h-4 mr-1"
-										fill="none"
-										stroke="currentColor"
-										stroke-width="2"
+										width="24px"
+										height="24px"
 										viewBox="0 0 24 24"
+										fill="none"
+										xmlns="http://www.w3.org/2000/svg"
+										stroke="#000000"
+										stroke-width="0.00024000000000000003"
 									>
-										<path
+										<g id="SVGRepo_bgCarrier" stroke-width="0"></g>
+										<g
+											id="SVGRepo_tracerCarrier"
 											stroke-linecap="round"
 											stroke-linejoin="round"
-											d="M14 10h4.764a2 2 0 011.789 2.894l-3.764 7.528A2 2 0 0115 22H9a2 2 0 01-1.789-1.578l-3.764-7.528A2 2 0 014.236 10H9m5 0V6a3 3 0 00-6 0v4"
-										/>
+										></g>
+										<g id="SVGRepo_iconCarrier">
+											<path
+												fill-rule="evenodd"
+												clip-rule="evenodd"
+												d="M15.0501 7.04419C15.4673 5.79254 14.5357 4.5 13.2163 4.5C12.5921 4.5 12.0062 4.80147 11.6434 5.30944L8.47155 9.75H5.85748L5.10748 10.5V18L5.85748 18.75H16.8211L19.1247 14.1428C19.8088 12.7747 19.5406 11.1224 18.4591 10.0408C17.7926 9.37439 16.8888 9 15.9463 9H14.3981L15.0501 7.04419ZM9.60751 10.7404L12.864 6.1813C12.9453 6.06753 13.0765 6 13.2163 6C13.5118 6 13.7205 6.28951 13.627 6.56984L12.317 10.5H15.9463C16.491 10.5 17.0133 10.7164 17.3984 11.1015C18.0235 11.7265 18.1784 12.6814 17.7831 13.472L15.8941 17.25H9.60751V10.7404ZM8.10751 17.25H6.60748V11.25H8.10751V17.25Z"
+												fill="#5c5c5c"
+											></path>
+										</g>
 									</svg>
 									{{ card.like }}
 								</div>
@@ -178,6 +189,58 @@
 		<div v-if="!hasMore" class="flex items-center justify-center py-4">
 			<span class="text-sm text-gray-400">没有更多内容了</span>
 		</div>
+
+		<!-- 视频播放模态框 -->
+		<div
+			v-if="showVideoModal"
+			class="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,0.8)]"
+			@click="closeVideoModal"
+		>
+			<div
+				class="relative w-full h-full max-w-4xl flex items-center justify-center p-4"
+			>
+				<!-- 关闭按钮 -->
+				<button
+					class="absolute top-4 right-4 z-999 bg-opacity-20 hover:bg-opacity-30 rounded-full p-2 transition-all"
+					@click="closeVideoModal"
+				>
+					<svg
+						class="w-6 h-6 text-white"
+						fill="none"
+						stroke="currentColor"
+						stroke-width="2"
+						viewBox="0 0 24 24"
+					>
+						<path
+							stroke-linecap="round"
+							stroke-linejoin="round"
+							d="M6 18L18 6M6 6l12 12"
+						/>
+					</svg>
+				</button>
+
+				<!-- 视频容器 -->
+				<div
+					class="relative w-full h-full max-w-4xl max-h-full rounded-lg overflow-hidden flex items-center justify-center"
+					@click.stop
+				>
+					<!-- 视频播放器容器 -->
+					<div
+						v-if="currentVideoData"
+						class="relative z-10 w-full h-full rounded-2xl overflow-hidden shadow-2xl bg-black flex items-center justify-center"
+					>
+						<video
+							ref="modalVideoRef"
+							:src="currentVideoData.videoUrl || currentVideoData.img"
+							class="w-auto h-auto max-w-full max-h-full object-contain video-responsive"
+							controls
+							autoplay
+							@ended="onModalVideoEnded"
+						></video>
+					</div>
+				</div>
+			</div>
+		</div>
 	</div>
 </template>
 
@@ -185,7 +248,8 @@
 	import { ref, onMounted, onUnmounted, nextTick, computed } from "vue";
 
 	// 数据转换函数
-	const transformApiData = (apiData: any[]): any[] => {
+	const transformApiData = (apiData: any[]) => {
+		like;
 		return apiData.map((item: any) => ({
 			id: item.id,
 			img: `${item.cover.url}`,
@@ -198,7 +262,12 @@
 			videoUrl: item.video ? `${item.video.url}` : undefined,
 		}));
 	};
-
+	const route = useRoute();
+	// route参数
+	const category = route.query?.category;
+	const like = route.query?.like;
+	const start = Number(route.query?.start) || 1;
+	const limit = Number(route.query?.limit) || 20;
 	// 响应式数据
 	const container = ref<HTMLElement | null>(null);
 	const cardRefs = ref(new Map());
@@ -210,7 +279,6 @@
 	const columnHeights = ref<number[]>([]);
 	const totalContentHeight = ref(0);
 	const currentPage = ref(1);
-	const pageSize = 20;
 	const isLoadingMore = ref(false);
 	const isRefreshing = ref(false);
 	const hasMore = ref(true);
@@ -223,14 +291,24 @@
 	const playingVideos = ref<Record<number, boolean>>({});
 	const isUserScrolling = ref(false); // 新增：用于判断用户是否在滚动
 
+	// 视频模态框相关
+	const showVideoModal = ref(false);
+	const currentVideoData = ref<any>(null);
+	const modalVideoRef = ref<HTMLVideoElement | null>(null);
+
 	// 存储所有卡片数据
 	const allCards = ref<any[]>([]);
 
 	// 初始化加载数据
-	const { data: initialList, error: initialError } = await getList({
-		start: 1,
-		limit: pageSize,
-	});
+	const { data: initialList, error: initialError } = await getList(
+		{
+			start,
+			limit,
+			category: category as string | null,
+			like: like as string | null,
+		},
+		true
+	);
 
 	if (initialList && initialList.value?.data) {
 		allCards.value = transformApiData(initialList.value.data);
@@ -320,14 +398,14 @@
 	};
 
 	// 获取图片显示高度（根据宽高比计算）
-	const getImageHeight = (index: number): number => {
+	const getImageHeight = (index: number) => {
 		const cardWidth = getCardWidth();
 		const aspectRatio = imageAspectRatios.value[index] || 1;
 		return cardWidth / aspectRatio;
 	};
 
 	// 预估卡片高度（用于未渲染的卡片）
-	const getEstimatedCardHeight = (index: number): number => {
+	const getEstimatedCardHeight = (index: number) => {
 		const card = displayCards.value[index];
 		if (!card) return 200;
 
@@ -462,6 +540,10 @@
 		}
 
 		updateTotalHeight();
+		// 🔥 新增：布局完成后检查是否需要加载更多
+		setTimeout(() => {
+			checkIfNeedLoadMore();
+		}, 100);
 	};
 
 	// 更新总高度
@@ -486,6 +568,8 @@
 					cardHeightsCache.value[index] = actualHeight;
 					updateTotalHeight();
 				}
+				// 🔥 新增：图片加载后检查是否需要加载更多
+				checkIfNeedLoadMore();
 			}
 		}, 10);
 	};
@@ -495,21 +579,35 @@
 		viewportHeight.value = window.innerHeight;
 		layoutCards(); // 窗口大小变化时重新计算所有位置
 	}, 300);
+	// 检查是否需要加载更多数据（独立函数）
+	const checkIfNeedLoadMore = async () => {
+		if (isLoadingMore.value || !hasMore.value || isRefreshing.value) return;
 
-	// 更新滚动位置
-	const updateScrollTop = () => {
-		scrollTop.value = window.pageYOffset || document.documentElement.scrollTop;
+		await nextTick(); // 等待DOM更新
 
-		// 检查是否需要加载更多
 		const documentHeight = document.documentElement.scrollHeight;
 		const windowHeight = window.innerHeight;
+		const currentScrollTop =
+			window.pageYOffset || document.documentElement.scrollTop;
 
-		// 距离底部100px时开始加载
-		if (!isLoadingMore.value && !isRefreshing.value && hasMore.value) {
-			if (scrollTop.value + windowHeight >= documentHeight - 100) {
-				loadMore();
-			}
+		// 情况1: 内容高度不足填满屏幕（无滚动条）
+		if (documentHeight <= windowHeight + 50) {
+			console.log("📱 Content height insufficient, auto-loading more...");
+			loadMore();
+			return;
 		}
+
+		// 情况2: 有滚动条且接近底部
+		if (currentScrollTop + windowHeight >= documentHeight - 100) {
+			console.log("🔄 Near bottom, loading more...");
+			loadMore();
+		}
+	};
+	// 更新滚动位置
+
+	const updateScrollTop = () => {
+		scrollTop.value = window.pageYOffset || document.documentElement.scrollTop;
+		checkIfNeedLoadMore();
 	};
 
 	// 加载更多数据
@@ -522,11 +620,13 @@
 			const nextPage = currentPage.value + 1;
 			const { data: nextData } = await getList({
 				start: nextPage,
-				limit: pageSize,
+				limit,
+				category: category as string | null,
+				like: like as string | null,
 			});
-
-			if (nextData && nextData.value?.data && nextData.value.data.length > 0) {
-				const newCards = transformApiData(nextData.value.data);
+			console.log(nextData);
+			if (nextData && nextData && nextData.length > 0) {
+				const newCards = transformApiData(nextData);
 				const oldLength = allCards.value.length;
 				allCards.value.push(...newCards);
 				currentPage.value = nextPage;
@@ -554,11 +654,13 @@
 
 		try {
 			const { data: refreshData } = await getList({
-				start: 1,
-				limit: pageSize,
+				start,
+				limit,
+				category: category as string | null,
+				like: like as string | null,
 			});
 
-			if (refreshData && refreshData.value?.data) {
+			if (refreshData && refreshData) {
 				// 重置状态
 				currentPage.value = 1;
 				hasMore.value = true;
@@ -571,7 +673,7 @@
 				totalContentHeight.value = 0;
 
 				// 更新数据
-				allCards.value = transformApiData(refreshData.value.data);
+				allCards.value = transformApiData(refreshData);
 
 				// 重新预加载图片和计算位置
 				displayCards.value.forEach((card, index) => {
@@ -631,24 +733,34 @@
 		isUserScrolling.value = false;
 	};
 
-	// 视频预览函数
+	// 视频预览函数 - 打开模态框
 	const previewVideo = (card: any) => {
-		// 切换播放状态
-		playingVideos.value[card.id] = true;
+		currentVideoData.value = card;
+		showVideoModal.value = true;
 
-		// 获取对应的video元素并播放
-		setTimeout(() => {
-			const videoElements = document.querySelectorAll(
-				`video[src*="${card.videoUrl || card.img}"]`
-			);
-			if (videoElements.length > 0) {
-				const videoElement = videoElements[0] as HTMLVideoElement;
-				videoElement.play().catch((error) => {
-					console.error("视频播放失败:", error);
-					playingVideos.value[card.id] = false;
-				});
-			}
-		}, 100);
+		// 防止背景滚动
+		document.body.style.overflow = "hidden";
+	};
+
+	// 关闭视频模态框
+	const closeVideoModal = () => {
+		showVideoModal.value = false;
+		currentVideoData.value = null;
+
+		// 恢复背景滚动
+		document.body.style.overflow = "";
+
+		// 停止视频播放
+		if (modalVideoRef.value) {
+			modalVideoRef.value.pause();
+			modalVideoRef.value.currentTime = 0;
+		}
+	};
+
+	// 模态框视频播放结束处理
+	const onModalVideoEnded = () => {
+		// 视频结束后可以选择关闭模态框或者其他操作
+		// closeVideoModal();
 	};
 
 	// 视频播放结束处理
@@ -673,6 +785,10 @@
 		layoutCards();
 		window.addEventListener("resize", debouncedResize);
 		window.addEventListener("scroll", updateScrollTop);
+		// 🔥 新增：初始化后检查是否需要加载更多
+		setTimeout(() => {
+			checkIfNeedLoadMore();
+		}, 500);
 	});
 
 	onUnmounted(() => {
@@ -687,5 +803,35 @@
 		-webkit-line-clamp: 2;
 		-webkit-box-orient: vertical;
 		overflow: hidden;
+	}
+
+	.blur-background {
+		background-size: cover;
+		background-position: center;
+		background-repeat: no-repeat;
+		filter: blur(20px);
+		transform: scale(1.1);
+		will-change: transform;
+	}
+
+	.video-responsive {
+		min-width: 0;
+		min-height: 0;
+		flex-shrink: 1;
+	}
+
+	/* 针对不同屏幕比例优化 */
+	@media (max-aspect-ratio: 16/9) {
+		.video-responsive {
+			width: 100% !important;
+			height: auto !important;
+		}
+	}
+
+	@media (min-aspect-ratio: 16/9) {
+		.video-responsive {
+			width: auto !important;
+			height: 100% !important;
+		}
 	}
 </style>
