@@ -85,6 +85,7 @@
 								transform: `translate3d(${
 									cardPositionsCache[card.originalIndex]?.x || 0
 								}px, ${cardPositionsCache[card.originalIndex]?.y || 0}px, 0)`,
+								willChange: 'transform',
 							}"
 						>
 							<!-- 图片容器 -->
@@ -529,6 +530,7 @@
 	// 计算可视卡片的核心函数
 	const calculateVisibleCards = () => {
 		const startTime = import.meta.client ? performance.now() : 0;
+
 		const cards = displayCards.value;
 		const visible: any[] = [];
 
@@ -562,7 +564,7 @@
 
 			const cardTop = position.y;
 			// 优先使用缓存的高度，避免重复计算
-			const cardHeight = cardHeightsCache.value[i]; // 使用默认高度避免计算
+			const cardHeight = cardHeightsCache.value[i] || 200; // 使用默认高度避免计算
 			const cardBottom = cardTop + cardHeight;
 
 			// 判断卡片是否在可视区域内
@@ -714,18 +716,18 @@
 		return (containerWidth - gap * (columnCount - 1)) / columnCount;
 	};
 
-	// // 初始化图片宽高比缓存（使用API返回的尺寸）
-	// const initializeImageAspectRatios = () => {
-	// 	allCards.value.forEach((card, index) => {
-	// 		if (card.coverWidth && card.coverHeight) {
-	// 			// 使用API返回的真实宽高比
-	// 			imageAspectRatios.value[index] = card.coverWidth / card.coverHeight;
-	// 		} else {
-	// 			// 如果API没有返回尺寸，使用默认值
-	// 			imageAspectRatios.value[index] = 1;
-	// 		}
-	// 	});
-	// };
+	// 初始化图片宽高比缓存（使用API返回的尺寸）
+	const initializeImageAspectRatios = () => {
+		allCards.value.forEach((card, index) => {
+			if (card.coverWidth && card.coverHeight) {
+				// 使用API返回的真实宽高比
+				imageAspectRatios.value[index] = card.coverWidth / card.coverHeight;
+			} else {
+				// 如果API没有返回尺寸，使用默认值
+				imageAspectRatios.value[index] = 1;
+			}
+		});
+	};
 
 	// 获取图片显示高度（根据宽高比计算）
 	const getImageHeight = (index: number) => {
