@@ -211,8 +211,11 @@
 			</div>
 		</div>
 
-		<!-- 上拉加载指示器 -->
-		<div v-if="isLoadingMore" class="flex items-center justify-center py-4">
+		<!-- 上拉加载指示器 - 只在有数据且正在加载更多时显示 -->
+		<div
+			v-if="isLoadingMore && allCards.length > 0"
+			class="flex items-center justify-center py-4"
+		>
 			<div
 				class="animate-spin rounded-full h-6 w-6 border-b-2 border-pink-500"
 			></div>
@@ -380,6 +383,7 @@
 	let rafId: number | null = null;
 	const requestCalculateVisibleCards = () => {
 		if (import.meta.client) {
+			console.log("客户端请求计算可视卡片");
 			if (rafId) return; // 避免重复请求
 			rafId = requestAnimationFrame(() => {
 				calculateVisibleCards();
@@ -587,13 +591,6 @@
 					缓存位置数量: cardPositionsCache.value.filter((p) => p).length,
 					总卡片数量: cards.length,
 				});
-
-				visible.forEach((card, idx) => {
-					const position = cardPositionsCache.value[card.originalIndex];
-					const height = cardHeightsCache.value[card.originalIndex];
-					const estimatedHeight = getEstimatedCardHeight(card.originalIndex);
-				});
-				console.groupEnd();
 
 				// 打印缺失的卡片信息（应该可见但未找到的）
 				const missingCards = [];
@@ -931,6 +928,7 @@
 
 	// 从指定索引开始重新计算卡片位置
 	const recalculateFromIndex = (startIndex: number) => {
+		console.log("重新计算卡片位置", startIndex);
 		// 确保容器已准备好
 		if (!container.value) {
 			console.warn("Container not ready for recalculation");
@@ -979,7 +977,9 @@
 
 	// 计算单个卡片位置（一旦计算就缓存）
 	const calculateCardPosition = (index: number) => {
+		console.log("计算卡片位置", index);
 		if (cardPositionsCache.value[index]) {
+			console.log("已经计算过，不再改变", index);
 			return; // 已经计算过，不再改变
 		}
 
@@ -1130,7 +1130,7 @@
 				}
 
 				// 🎯 优化：使用智能局部更新替代全量重新计算
-				if (diff > 15) {
+				if (diff > 1) {
 					// 更新实际高度
 					cardHeightsCache.value[index] = actualHeight;
 
@@ -1249,14 +1249,14 @@
 
 		try {
 			const nextPage = currentPage.value + 1;
-			const { data: nextList } = await getList({
+			const nextList = (await getList({
 				start: nextPage,
 				limit,
 				category: category as string | null,
 				like: like as string | null,
-			});
-			if (nextList && nextList && nextList.length > 0) {
-				const newCards = transformApiData(nextList);
+			})) as any;
+			if (nextList && nextList.data && nextList.data.length > 0) {
+				const newCards = transformApiData(nextList.data);
 				const oldLength = allCards.value.length;
 				allCards.value.push(...newCards);
 				currentPage.value = nextPage;
@@ -1282,14 +1282,14 @@
 		isRefreshing.value = true;
 
 		try {
-			const { data: refreshList } = await getList({
+			const refreshList = (await getList({
 				start,
 				limit,
 				category: category as string | null,
 				like: like as string | null,
-			});
+			})) as any;
 
-			if (refreshList && refreshList) {
+			if (refreshList && refreshList.data) {
 				// 重置状态
 				currentPage.value = 1;
 				hasMore.value = true;
@@ -1303,7 +1303,7 @@
 				totalContentHeight.value = 0;
 
 				// 更新数据
-				allCards.value = transformApiData(refreshList);
+				allCards.value = transformApiData(refreshList.data);
 
 				// 重新初始化图片宽高比和计算位置
 				displayCards.value.forEach((card, index) => {
@@ -1415,15 +1415,15 @@
 		try {
 			isLoadingMore.value = true;
 
-			const { data: initialList } = await getList({
+			const initialList = (await getList({
 				start,
 				limit,
 				category: category as string | null,
 				like: like as string | null,
-			});
+			})) as any;
 
-			if (initialList && initialList && initialList.length > 0) {
-				allCards.value = transformApiData(initialList);
+			if (initialList && initialList.data && initialList.data.length > 0) {
+				allCards.value = transformApiData(initialList.data);
 
 				// 初始化图片宽高比
 				await nextTick();
