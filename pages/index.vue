@@ -53,140 +53,160 @@
 		<!-- 虚拟瀑布流容器 -->
 		<div class="flex justify-center">
 			<div ref="container" class="relative px-2 mt-2 max-w-6xl w-full">
+				<!-- 初始加载指示器 -->
+				<div
+					v-if="allCards.length === 0 && isLoadingMore"
+					class="flex flex-col items-center justify-center py-20"
+				>
+					<div
+						class="animate-spin rounded-full h-12 w-12 border-4 border-pink-500 border-t-transparent mb-4"
+					></div>
+					<span class="text-gray-500 text-sm">正在加载内容...</span>
+				</div>
+
+				<!-- 空状态 -->
+				<div
+					v-else-if="allCards.length === 0 && !isLoadingMore && !hasMore"
+					class="flex flex-col items-center justify-center py-20"
+				>
+					<div class="text-6xl mb-4">📱</div>
+					<span class="text-gray-500 text-lg mb-2">暂无内容</span>
+					<span class="text-gray-400 text-sm">请稍后再试或检查网络连接</span>
+				</div>
 				<!-- 外层容器维持总高度 - 动态计算所有卡片的总高度 -->
 				<div :style="{ height: totalContentHeight + 'px' }" class="relative">
 					<!-- 卡片渲染区域 - 只渲染可视区域内的卡片 -->
-					<div
-						v-for="card in visibleCards"
-						:key="card.id"
-						:ref="(el) => { if (el) setCardRef(el as HTMLElement, card.originalIndex) }"
-						class="absolute bg-white rounded-xs shadow overflow-hidden"
-						:style="{
-							width: cardPositionsCache[card.originalIndex]?.width || '0px',
-							transform: `translate3d(${
-								cardPositionsCache[card.originalIndex]?.x || 0
-							}px, ${cardPositionsCache[card.originalIndex]?.y || 0}px, 0)`,
-							willChange: 'transform',
-						}"
-					>
-						<!-- 图片容器 -->
-						<div class="relative">
-							<!-- 图片占位容器 - 使用API尺寸预先设置高度 -->
-							<div
-								class="w-full bg-gray-100 relative flex items-center justify-center"
-								:style="{ height: getImageHeight(card.originalIndex) + 'px' }"
-							>
-								<!-- 加载指示器 -->
+					<template v-for="card in visibleCards" :key="card.id">
+						<div
+							:ref="(el) => { if (el) setCardRef(el as HTMLElement, card.originalIndex) }"
+							class="absolute bg-white rounded-xs shadow overflow-hidden"
+							:style="{
+								width: cardPositionsCache[card.originalIndex]?.width || '0px',
+								transform: `translate3d(${
+									cardPositionsCache[card.originalIndex]?.x || 0
+								}px, ${cardPositionsCache[card.originalIndex]?.y || 0}px, 0)`,
+								willChange: 'transform',
+							}"
+						>
+							<!-- 图片容器 -->
+							<div class="relative">
+								<!-- 图片占位容器 - 使用API尺寸预先设置高度 -->
 								<div
-									v-if="!imageLoadedStates[card.originalIndex]"
-									class="absolute inset-0 flex items-center justify-center bg-gray-100"
+									class="w-full bg-gray-100 relative flex items-center justify-center"
+									:style="{ height: getImageHeight(card.originalIndex) + 'px' }"
 								>
-									<div class="animate-pulse flex space-x-1">
-										<div class="w-2 h-2 bg-gray-300 rounded-full"></div>
-										<div class="w-2 h-2 bg-gray-300 rounded-full"></div>
-										<div class="w-2 h-2 bg-gray-300 rounded-full"></div>
+									<!-- 加载指示器 -->
+									<div
+										v-if="!imageLoadedStates[card.originalIndex]"
+										class="absolute inset-0 flex items-center justify-center bg-gray-100"
+									>
+										<div class="animate-pulse flex space-x-1">
+											<div class="w-2 h-2 bg-gray-300 rounded-full"></div>
+											<div class="w-2 h-2 bg-gray-300 rounded-full"></div>
+											<div class="w-2 h-2 bg-gray-300 rounded-full"></div>
+										</div>
+									</div>
+
+									<!-- 封面图片 -->
+									<img
+										:src="card.img"
+										class="w-full h-full object-cover transition-opacity duration-300"
+										:class="{
+											'opacity-0': playingVideos[card.id],
+											'opacity-100': imageLoadedStates[card.originalIndex],
+										}"
+										:alt="card.title"
+										@load="onImageLoad(card.originalIndex)"
+									/>
+								</div>
+
+								<!-- 视频元素 - 仅对video类型显示 -->
+								<video
+									v-if="card.type === 'video'"
+									ref="videoRef"
+									:src="card.videoUrl || card.img"
+									class="absolute top-0 left-0 w-full h-full object-cover transition-opacity duration-300"
+									:class="{
+										'opacity-100': playingVideos[card.id],
+										'opacity-0': !playingVideos[card.id],
+									}"
+									:style="{ height: getImageHeight(card.originalIndex) + 'px' }"
+									:muted="false"
+									@ended="onVideoEnded(card.id)"
+									@pause="onVideoPaused(card.id)"
+								></video>
+
+								<!-- 视频预览按钮 -->
+								<div
+									v-if="card.type === 'video'"
+									class="absolute top-2 left-2 bg-[rgba(0,0,0,0.7)] rounded-full p-1 cursor-pointer hover:bg-opacity-50 transition-all z-10"
+									:class="{
+										'opacity-0 pointer-events-none': playingVideos[card.id],
+									}"
+									@click="previewVideo(card)"
+								>
+									<svg
+										class="w-3 h-3 text-white"
+										fill="currentColor"
+										viewBox="0 0 24 24"
+									>
+										<path d="M8 5v14l11-7z" />
+									</svg>
+								</div>
+							</div>
+
+							<div class="p-3">
+								<div
+									class="text-sm font-semibold text-gray-800 leading-tight line-clamp-2"
+								>
+									{{ card.title }}
+								</div>
+
+								<!-- 标签容器 -->
+								<div class="mt-2">
+									<span
+										class="inline-block bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded"
+									>
+										{{ card.category }}
+									</span>
+								</div>
+
+								<div class="flex items-center justify-between mt-3">
+									<div class="flex items-center space-x-1">
+										<img :src="card.avatar" class="w-5 h-5 rounded-full" />
+										<span class="text-xs text-gray-500">{{ card.user }}</span>
+									</div>
+									<div class="flex items-center text-xs text-gray-400">
+										<svg
+											width="24px"
+											height="24px"
+											viewBox="0 0 24 24"
+											fill="none"
+											xmlns="http://www.w3.org/2000/svg"
+											stroke="#000000"
+											stroke-width="0.00024000000000000003"
+										>
+											<g id="SVGRepo_bgCarrier" stroke-width="0"></g>
+											<g
+												id="SVGRepo_tracerCarrier"
+												stroke-linecap="round"
+												stroke-linejoin="round"
+											></g>
+											<g id="SVGRepo_iconCarrier">
+												<path
+													fill-rule="evenodd"
+													clip-rule="evenodd"
+													d="M15.0501 7.04419C15.4673 5.79254 14.5357 4.5 13.2163 4.5C12.5921 4.5 12.0062 4.80147 11.6434 5.30944L8.47155 9.75H5.85748L5.10748 10.5V18L5.85748 18.75H16.8211L19.1247 14.1428C19.8088 12.7747 19.5406 11.1224 18.4591 10.0408C17.7926 9.37439 16.8888 9 15.9463 9H14.3981L15.0501 7.04419ZM9.60751 10.7404L12.864 6.1813C12.9453 6.06753 13.0765 6 13.2163 6C13.5118 6 13.7205 6.28951 13.627 6.56984L12.317 10.5H15.9463C16.491 10.5 17.0133 10.7164 17.3984 11.1015C18.0235 11.7265 18.1784 12.6814 17.7831 13.472L15.8941 17.25H9.60751V10.7404ZM8.10751 17.25H6.60748V11.25H8.10751V17.25Z"
+													fill="#5c5c5c"
+												></path>
+											</g>
+										</svg>
+										{{ card.like }}
 									</div>
 								</div>
-
-								<!-- 封面图片 -->
-								<img
-									:src="card.img"
-									class="w-full h-full object-cover transition-opacity duration-300"
-									:class="{
-										'opacity-0': playingVideos[card.id],
-										'opacity-100': imageLoadedStates[card.originalIndex],
-									}"
-									:alt="card.title"
-									@load="onImageLoad(card.originalIndex)"
-								/>
-							</div>
-
-							<!-- 视频元素 - 仅对video类型显示 -->
-							<video
-								v-if="card.type === 'video'"
-								ref="videoRef"
-								:src="card.videoUrl || card.img"
-								class="absolute top-0 left-0 w-full h-full object-cover transition-opacity duration-300"
-								:class="{
-									'opacity-100': playingVideos[card.id],
-									'opacity-0': !playingVideos[card.id],
-								}"
-								:style="{ height: getImageHeight(card.originalIndex) + 'px' }"
-								:muted="false"
-								@ended="onVideoEnded(card.id)"
-								@pause="onVideoPaused(card.id)"
-							></video>
-
-							<!-- 视频预览按钮 -->
-							<div
-								v-if="card.type === 'video'"
-								class="absolute top-2 left-2 bg-[rgba(0,0,0,0.7)] rounded-full p-1 cursor-pointer hover:bg-opacity-50 transition-all z-10"
-								:class="{
-									'opacity-0 pointer-events-none': playingVideos[card.id],
-								}"
-								@click="previewVideo(card)"
-							>
-								<svg
-									class="w-3 h-3 text-white"
-									fill="currentColor"
-									viewBox="0 0 24 24"
-								>
-									<path d="M8 5v14l11-7z" />
-								</svg>
 							</div>
 						</div>
-
-						<div class="p-3">
-							<div
-								class="text-sm font-semibold text-gray-800 leading-tight line-clamp-2"
-							>
-								{{ card.title }}
-							</div>
-
-							<!-- 标签容器 -->
-							<div class="mt-2">
-								<span
-									class="inline-block bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded"
-								>
-									{{ card.category }}
-								</span>
-							</div>
-
-							<div class="flex items-center justify-between mt-3">
-								<div class="flex items-center space-x-1">
-									<img :src="card.avatar" class="w-5 h-5 rounded-full" />
-									<span class="text-xs text-gray-500">{{ card.user }}</span>
-								</div>
-								<div class="flex items-center text-xs text-gray-400">
-									<svg
-										width="24px"
-										height="24px"
-										viewBox="0 0 24 24"
-										fill="none"
-										xmlns="http://www.w3.org/2000/svg"
-										stroke="#000000"
-										stroke-width="0.00024000000000000003"
-									>
-										<g id="SVGRepo_bgCarrier" stroke-width="0"></g>
-										<g
-											id="SVGRepo_tracerCarrier"
-											stroke-linecap="round"
-											stroke-linejoin="round"
-										></g>
-										<g id="SVGRepo_iconCarrier">
-											<path
-												fill-rule="evenodd"
-												clip-rule="evenodd"
-												d="M15.0501 7.04419C15.4673 5.79254 14.5357 4.5 13.2163 4.5C12.5921 4.5 12.0062 4.80147 11.6434 5.30944L8.47155 9.75H5.85748L5.10748 10.5V18L5.85748 18.75H16.8211L19.1247 14.1428C19.8088 12.7747 19.5406 11.1224 18.4591 10.0408C17.7926 9.37439 16.8888 9 15.9463 9H14.3981L15.0501 7.04419ZM9.60751 10.7404L12.864 6.1813C12.9453 6.06753 13.0765 6 13.2163 6C13.5118 6 13.7205 6.28951 13.627 6.56984L12.317 10.5H15.9463C16.491 10.5 17.0133 10.7164 17.3984 11.1015C18.0235 11.7265 18.1784 12.6814 17.7831 13.472L15.8941 17.25H9.60751V10.7404ZM8.10751 17.25H6.60748V11.25H8.10751V17.25Z"
-												fill="#5c5c5c"
-											></path>
-										</g>
-									</svg>
-									{{ card.like }}
-								</div>
-							</div>
-						</div>
-					</div>
+					</template>
 				</div>
 			</div>
 		</div>
@@ -319,81 +339,6 @@
 	const currentVideoData = ref<any>(null);
 	const modalVideoRef = ref<HTMLVideoElement | null>(null);
 
-	// 存储所有卡片数据
-	const allCards = ref<any[]>([]);
-
-	// 初始化加载数据
-	const { data: initialList, error: initialError } = await getList(
-		{
-			start,
-			limit,
-			category: category as string | null,
-			like: like as string | null,
-		},
-		true
-	);
-
-	if (initialList && initialList.value?.data) {
-		allCards.value = transformApiData(initialList.value.data);
-	} else {
-		console.error("Failed to load initial data:", initialError);
-		hasMore.value = false;
-	}
-
-	// 计算当前显示的卡片
-	const displayCards = computed(() => {
-		return allCards.value;
-	});
-
-	// 虚拟列表：只渲染可视区域内的卡片
-	const visibleCards = computed(() => {
-		const cards = displayCards.value;
-		const visible: any[] = [];
-
-		// 如果没有卡片或容器未准备好，返回空数组
-		if (cards.length === 0 || !container.value) {
-			return visible;
-		}
-
-		// 计算可视区域
-		const viewTop = scrollTop.value - bufferHeight.value;
-		const viewBottom =
-			scrollTop.value + viewportHeight.value + bufferHeight.value;
-
-		for (let i = 0; i < cards.length; i++) {
-			const position = cardPositionsCache.value[i];
-
-			// 如果位置未计算，尝试计算（但不阻塞渲染）
-			if (!position) {
-				// 异步计算位置，避免阻塞当前渲染
-				nextTick(() => {
-					if (!cardPositionsCache.value[i] && container.value) {
-						calculateCardPosition(i);
-					}
-				});
-				continue;
-			}
-
-			const cardTop = position.y;
-			const cardHeight = cardHeightsCache.value[i] || getEstimatedCardHeight(i);
-			const cardBottom = cardTop + cardHeight;
-
-			// 判断卡片是否在可视区域内
-			if (cardBottom >= viewTop && cardTop <= viewBottom) {
-				visible.push({
-					...cards[i],
-					originalIndex: i,
-				});
-			}
-		}
-
-		return visible;
-	});
-
-	// 瀑布流布局参数
-	const gap = 8; // 卡片间距
-	const padding = 8; // 容器内边距
-
 	// 防抖函数
 	const debounce = (func: Function, delay: number) => {
 		let timeoutId: ReturnType<typeof setTimeout>;
@@ -403,34 +348,435 @@
 		};
 	};
 
+	// 存储所有卡片数据 - 服务端渲染时为空，客户端再加载
+	const allCards = ref<any[]>([]);
+
+	// 服务端渲染时不加载数据，客户端再请求
+	// const { data: initialList, error: initialError } = await getList({
+	// 	start,
+	// 	limit,
+	// 	category: category as string | null,
+	// 	like: like as string | null,
+	// });
+
+	// if (initialList && initialList.value?.data) {
+	// 	allCards.value = transformApiData(initialList.value.data);
+	// } else {
+	// 	console.error("Failed to load initial data:", initialError);
+	// 	hasMore.value = false;
+	// }
+
+	// 计算当前显示的卡片
+	const displayCards = computed(() => {
+		return allCards.value;
+	});
+
+	// 缓存虚拟列表计算结果
+	const visibleCardsCache = ref<any[]>([]);
+	const lastScrollTop = ref(0);
+	const lastViewportHeight = ref(0);
+
+	// 使用 RAF 优化虚拟列表计算（仅客户端）
+	let rafId: number | null = null;
+	const requestCalculateVisibleCards = () => {
+		if (import.meta.client) {
+			if (rafId) return; // 避免重复请求
+			rafId = requestAnimationFrame(() => {
+				calculateVisibleCards();
+				rafId = null;
+			});
+		} else {
+			// 服务端直接执行
+			calculateVisibleCards();
+		}
+	};
+
+	// 性能监控
+	const performanceStats = ref({
+		lastCalculateTime: 0,
+		averageCalculateTime: 0,
+		calculateCount: 0,
+	});
+
+	// 手动调试函数 - 可在浏览器控制台调用 window.debugVirtualList()
+	const debugVirtualList = () => {
+		if (!import.meta.client) return;
+
+		const cards = displayCards.value;
+		const viewTop = scrollTop.value - bufferHeight.value;
+		const viewBottom =
+			scrollTop.value + viewportHeight.value + bufferHeight.value;
+
+		console.clear();
+
+		// 分析所有卡片的状态
+		const cardAnalysis: {
+			可见卡片: any[];
+			应该可见但未显示: any[];
+			位置未计算: any[];
+			高度未测量: any[];
+		} = {
+			可见卡片: [],
+			应该可见但未显示: [],
+			位置未计算: [],
+			高度未测量: [],
+		};
+
+		for (let i = 0; i < Math.min(cards.length, 100); i++) {
+			const card = cards[i];
+			const position = cardPositionsCache.value[i];
+			const height = cardHeightsCache.value[i];
+			const estimatedHeight = getEstimatedCardHeight(i);
+
+			if (!position) {
+				cardAnalysis.位置未计算.push({
+					索引: i,
+					标题: card?.title?.substring(0, 15) + "...",
+				});
+				continue;
+			}
+
+			if (!height) {
+				cardAnalysis.高度未测量.push({
+					索引: i,
+					标题: card?.title?.substring(0, 15) + "...",
+					位置: `(${position.x}, ${position.y})`,
+					预估高度: estimatedHeight,
+				});
+			}
+
+			const cardBottom = position.y + (height || estimatedHeight);
+			const shouldBeVisible = cardBottom >= viewTop && position.y <= viewBottom;
+			const isInVisibleList = visibleCardsCache.value.some(
+				(v) => v.originalIndex === i
+			);
+
+			if (shouldBeVisible) {
+				if (isInVisibleList) {
+					cardAnalysis.可见卡片.push({
+						索引: i,
+						标题: card?.title?.substring(0, 15) + "...",
+						位置: `(${position.x}, ${position.y})`,
+						高度: height || "预估:" + estimatedHeight,
+						范围: `${position.y} ~ ${cardBottom}`,
+						状态: "✓ 正常显示",
+					});
+				} else {
+					cardAnalysis.应该可见但未显示.push({
+						索引: i,
+						标题: card?.title?.substring(0, 15) + "...",
+						位置: `(${position.x}, ${position.y})`,
+						高度: height || "预估:" + estimatedHeight,
+						范围: `${position.y} ~ ${cardBottom}`,
+						状态: "❌ 缺失",
+					});
+				}
+			}
+		}
+
+		// 打印分析结果
+		Object.entries(cardAnalysis).forEach(([category, items]) => {
+			if (items.length > 0) {
+				console.group(`${category} (${items.length}项)`);
+				items.forEach((item) => console.log(item));
+				console.groupEnd();
+			}
+		});
+
+		return {
+			基础信息: {
+				滚动位置: scrollTop.value,
+				可视区域: `${viewTop} ~ ${viewBottom}`,
+				卡片分析: cardAnalysis,
+			},
+		};
+	};
+
+	// 简化版调试函数 - 快速查看当前状态
+	const quickDebug = () => {
+		if (!import.meta.client) return;
+
+		const viewTop = scrollTop.value - bufferHeight.value;
+		const viewBottom =
+			scrollTop.value + viewportHeight.value + bufferHeight.value;
+		const visibleCount = visibleCardsCache.value.length;
+	};
+
+	// 将调试函数暴露到全局，方便在控制台调用
+	if (import.meta.client) {
+		(window as any).debugVirtualList = debugVirtualList;
+		(window as any).quickDebug = quickDebug;
+
+		// 添加键盘快捷键 Ctrl+Shift+D 触发快速调试
+		window.addEventListener("keydown", (e) => {
+			if (e.ctrlKey && e.shiftKey && e.key === "D") {
+				e.preventDefault();
+				quickDebug();
+			}
+		});
+	}
+
+	// 计算可视卡片的核心函数
+	const calculateVisibleCards = () => {
+		const startTime = import.meta.client ? performance.now() : 0;
+
+		const cards = displayCards.value;
+		const visible: any[] = [];
+
+		// 如果没有卡片或容器未准备好，返回空数组
+		if (cards.length === 0 || !container.value) {
+			visibleCardsCache.value = visible;
+			return;
+		}
+
+		// 计算可视区域
+		const viewTop = scrollTop.value - bufferHeight.value;
+		const viewBottom =
+			scrollTop.value + viewportHeight.value + bufferHeight.value;
+
+		// 修复：使用实际位置来查找可视卡片，添加调试信息
+		let foundVisibleCards = 0;
+		let skippedCards = 0;
+		let totalCheckedCards = 0;
+
+		for (let i = 0; i < cards.length; i++) {
+			totalCheckedCards++;
+			const position = cardPositionsCache.value[i];
+
+			// 如果位置未计算，跳过（避免阻塞渲染）
+			if (!position) {
+				skippedCards++;
+				// 标记需要计算位置的卡片，但不在这里计算
+				if (!cardPositionsCache.value[i]) {
+					// 延迟计算，避免阻塞
+					setTimeout(() => {
+						if (!cardPositionsCache.value[i] && container.value) {
+							calculateCardPosition(i);
+							// 重新计算可视卡片
+							requestCalculateVisibleCards();
+						}
+					}, 0);
+				}
+				continue;
+			}
+
+			const cardTop = position.y;
+			// 优先使用缓存的高度，避免重复计算
+			const cardHeight = cardHeightsCache.value[i] || 200; // 使用默认高度避免计算
+			const cardBottom = cardTop + cardHeight;
+
+			// 判断卡片是否在可视区域内
+			if (cardBottom >= viewTop && cardTop <= viewBottom) {
+				visible.push({
+					...cards[i],
+					originalIndex: i,
+				});
+				foundVisibleCards++;
+			}
+		}
+
+		// 调试信息：检查虚拟列表计算结果
+		if (import.meta.client && process.env.NODE_ENV === "development") {
+			if (performanceStats.value.calculateCount % 20 === 0) {
+				console.log(`🔍 虚拟列表调试:`, {
+					滚动位置: scrollTop.value,
+					可视区域: `${viewTop} ~ ${viewBottom}`,
+					找到可视卡片: foundVisibleCards,
+					跳过未计算卡片: skippedCards,
+					总检查卡片: totalCheckedCards,
+					缓存位置数量: cardPositionsCache.value.filter((p) => p).length,
+					总卡片数量: cards.length,
+				});
+
+				visible.forEach((card, idx) => {
+					const position = cardPositionsCache.value[card.originalIndex];
+					const height = cardHeightsCache.value[card.originalIndex];
+					const estimatedHeight = getEstimatedCardHeight(card.originalIndex);
+				});
+				console.groupEnd();
+
+				// 打印缺失的卡片信息（应该可见但未找到的）
+				const missingCards = [];
+				for (let i = 0; i < Math.min(cards.length, 50); i++) {
+					// 只检查前50张卡片
+					const position = cardPositionsCache.value[i];
+					if (position) {
+						const height = cardHeightsCache.value[i];
+						const cardBottom = position.y + height;
+						const shouldBeVisible =
+							cardBottom >= viewTop && position.y <= viewBottom;
+						const isInVisibleList = visible.some((v) => v.originalIndex === i);
+
+						if (shouldBeVisible && !isInVisibleList) {
+							missingCards.push({
+								index: i,
+								title: cards[i]?.title?.substring(0, 15) + "...",
+								position: `(${position.x}, ${position.y})`,
+								height: height,
+								range: `${position.y} ~ ${cardBottom}`,
+							});
+						}
+					}
+				}
+
+				if (missingCards.length > 0) {
+					console.warn(
+						`⚠️ 发现${missingCards.length}张应该可见但未显示的卡片:`,
+						missingCards
+					);
+				}
+			}
+		}
+
+		visibleCardsCache.value = visible;
+
+		// 性能统计（仅客户端）
+		if (import.meta.client) {
+			const endTime = performance.now();
+			const calculateTime = endTime - startTime;
+			performanceStats.value.lastCalculateTime = calculateTime;
+			performanceStats.value.calculateCount++;
+			performanceStats.value.averageCalculateTime =
+				(performanceStats.value.averageCalculateTime *
+					(performanceStats.value.calculateCount - 1) +
+					calculateTime) /
+				performanceStats.value.calculateCount;
+		}
+	};
+
+	// 虚拟列表：只渲染可视区域内的卡片
+	const visibleCards = computed(() => {
+		// 检查是否需要重新计算
+		const scrollChanged = Math.abs(scrollTop.value - lastScrollTop.value) > 5; // 降低阈值，更敏感
+		const viewportChanged =
+			Math.abs(viewportHeight.value - lastViewportHeight.value) > 10;
+
+		// 强制重新计算的条件
+		const forceRecalculate =
+			visibleCardsCache.value.length === 0 || // 没有可视卡片
+			(scrollChanged && visibleCardsCache.value.length < 6); // 滚动且可视卡片太少
+
+		if (scrollChanged || viewportChanged || forceRecalculate) {
+			lastScrollTop.value = scrollTop.value;
+			lastViewportHeight.value = viewportHeight.value;
+			requestCalculateVisibleCards();
+		}
+
+		return visibleCardsCache.value;
+	});
+
+	// 瀑布流布局参数
+	const gap = 8; // 卡片间距（水平和垂直都使用相同间距）
+	const containerPadding = 8; // 容器左右内边距（对应 px-2 = 8px）
+	const topGap = 8; // 顶部间距，确保第一行也有间距
+
+	// 批量更新队列
+	const pendingUpdates = ref<Set<number>>(new Set());
+	let batchUpdateTimer: ReturnType<typeof setTimeout> | null = null;
+
 	// 设置卡片引用
 	const setCardRef = (el: HTMLElement, index: number) => {
 		cardRefs.value.set(index, el);
+
 		// 更新实际高度缓存
 		const actualHeight = el.offsetHeight;
-		const estimatedHeight =
-			cardHeightsCache.value[index] || getEstimatedCardHeight(index);
+		const estimatedHeight = cardHeightsCache.value[index];
+		const diff = Math.abs(actualHeight - estimatedHeight);
 
-		// 只有当实际高度与预估高度差异超过阈值时才重新计算
-		if (Math.abs(actualHeight - estimatedHeight) > 10) {
-			console.log(
-				`Card ${index}: estimated ${estimatedHeight}px, actual ${actualHeight}px, diff ${Math.abs(
-					actualHeight - estimatedHeight
-				)}px`
-			);
-			cardHeightsCache.value[index] = actualHeight;
-			// 高度发生变化时，重新计算后续卡片位置
-			recalculateFromIndex(index + 1);
-		} else {
-			// 高度差异很小，直接更新缓存即可
-			cardHeightsCache.value[index] = actualHeight;
+		// 🎯 优化：如果高度差异较大，加入批量更新队列
+		if (diff > 10) {
+			pendingUpdates.value.add(index);
+			scheduleBatchUpdate();
+		}
+
+		// 立即缓存实际高度
+		cardHeightsCache.value[index] = actualHeight;
+	};
+
+	// 🚀 批量更新调度器
+	const scheduleBatchUpdate = () => {
+		if (batchUpdateTimer) {
+			clearTimeout(batchUpdateTimer);
+		}
+
+		// 延迟50ms批量处理，避免频繁更新
+		batchUpdateTimer = setTimeout(() => {
+			processBatchUpdates();
+			batchUpdateTimer = null;
+		}, 50);
+	};
+
+	// 🚀 批量处理高度更新
+	const processBatchUpdates = () => {
+		if (pendingUpdates.value.size === 0) return;
+
+		// 按索引排序，从前往后处理
+		const sortedIndexes = Array.from(pendingUpdates.value).sort(
+			(a, b) => a - b
+		);
+
+		// 记录每列的累积调整
+		const columnAdjustments = new Array(getColumnCount()).fill(0);
+
+		for (const index of sortedIndexes) {
+			const estimatedHeight = getEstimatedCardHeight(index);
+			const actualHeight = cardHeightsCache.value[index];
+			const heightDiff = actualHeight - estimatedHeight;
+
+			if (Math.abs(heightDiff) > 10) {
+				const position = cardPositionsCache.value[index];
+				if (position) {
+					const columnIndex = Math.round(position.x / (getCardWidth() + gap));
+
+					// 累积该列的调整量
+					columnAdjustments[columnIndex] += heightDiff;
+
+					// 调整同列后续卡片的位置
+					adjustSubsequentCardsInColumn(columnIndex, index, heightDiff);
+				}
+			}
+		}
+
+		// 更新列高度
+		for (let i = 0; i < columnAdjustments.length; i++) {
+			if (columnAdjustments[i] !== 0) {
+				columnHeights.value[i] += columnAdjustments[i];
+			}
+		}
+
+		// 清空队列
+		pendingUpdates.value.clear();
+		updateTotalHeight();
+	};
+
+	// 🎯 调整同列后续卡片位置
+	const adjustSubsequentCardsInColumn = (
+		columnIndex: number,
+		fromIndex: number,
+		heightDiff: number
+	) => {
+		const fromPosition = cardPositionsCache.value[fromIndex];
+		if (!fromPosition) return;
+
+		let adjustedCount = 0;
+		for (let i = fromIndex + 1; i < displayCards.value.length; i++) {
+			const position = cardPositionsCache.value[i];
+			if (position) {
+				const cardColumn = Math.round(position.x / (getCardWidth() + gap));
+
+				if (cardColumn === columnIndex && position.y > fromPosition.y) {
+					position.y += heightDiff;
+					cardPositionsCache.value[i] = { ...position };
+					adjustedCount++;
+				}
+			}
 		}
 	};
 
 	// 计算列数
 	const getColumnCount = () => {
 		if (!container.value) return 2;
-		const containerWidth = container.value.clientWidth - padding * 2;
+		const containerWidth = container.value.clientWidth - containerPadding * 2;
 
 		// 根据屏幕宽度计算列数
 		if (containerWidth < 480) return 2; // 小屏幕2列
@@ -442,7 +788,7 @@
 	// 计算卡片宽度
 	const getCardWidth = () => {
 		if (!container.value) return 0;
-		const containerWidth = container.value.clientWidth - padding * 2;
+		const containerWidth = container.value.clientWidth - containerPadding * 2;
 		const columnCount = getColumnCount();
 		return (containerWidth - gap * (columnCount - 1)) / columnCount;
 	};
@@ -501,28 +847,43 @@
 		}
 
 		// 确保图片高度合理
-		imageHeight = Math.max(100, Math.min(imageHeight, cardWidth * 2)); // 限制在100px到2倍宽度之间
+		imageHeight = Math.max(100, Math.min(imageHeight, cardWidth * 2));
 
-		// 更精确的标题高度计算
-		const charsPerLine = Math.max(1, Math.floor(cardWidth / 12)); // 确保至少1个字符每行
-		const titleLines = Math.ceil((card.title?.length || 0) / charsPerLine);
-		const titleHeight = Math.max(22, titleLines * 22); // 至少一行高度
+		// 更精确的标题高度计算（考虑实际字体渲染）
+		const titleText = card.title || "";
+		// 中文字符约14px宽，英文字符约8px宽，混合估算为11px
+		const avgCharWidth = 11;
+		const charsPerLine = Math.max(
+			1,
+			Math.floor((cardWidth - 24) / avgCharWidth)
+		); // 减去padding
+		const titleLines = Math.min(2, Math.ceil(titleText.length / charsPerLine)); // line-clamp-2限制
+		const lineHeight = 20; // text-sm的实际行高
+		const titleHeight = titleLines * lineHeight;
 
-		// 分类标签高度
-		const categoryHeight = 28;
+		// 分类标签高度：text-xs + px-2 + py-1 + rounded + mt-2
+		const categoryHeight = 16 + 4 + 8; // 字体高度 + 垂直padding + margin
 
-		// 用户信息区域高度
-		const userInfoHeight = 32;
+		// 用户信息区域高度：头像20px + mt-3
+		const userInfoHeight = 20 + 12; // 头像高度 + margin
 
-		// 卡片内边距
+		// 卡片内边距：p-3 = 12px * 2
 		const cardPadding = 24;
 
+		// 各部分间距
+		const spaceBetweenSections = 8; // mt-2 + mt-3的总和
+
 		const totalHeight = Math.round(
-			imageHeight + titleHeight + categoryHeight + userInfoHeight + cardPadding
+			imageHeight +
+				titleHeight +
+				categoryHeight +
+				userInfoHeight +
+				cardPadding +
+				spaceBetweenSections
 		);
 
 		// 确保返回合理的高度
-		return Math.max(150, totalHeight); // 最小高度150px
+		return Math.max(150, totalHeight);
 	};
 
 	// 初始化图片宽高比（优先使用API数据，fallback到图片加载）
@@ -585,7 +946,8 @@
 			return;
 		}
 
-		const newColumnHeights = new Array(columnCount).fill(0);
+		// 初始化列高度为顶部间距
+		const newColumnHeights = new Array(columnCount).fill(topGap);
 
 		// 重新计算列高度到 startIndex 位置
 		for (let i = 0; i < startIndex; i++) {
@@ -594,8 +956,7 @@
 				const columnIndex = Math.round(position.x / (cardWidth + gap));
 				// 确保列索引有效
 				if (columnIndex >= 0 && columnIndex < columnCount) {
-					const cardHeight =
-						cardHeightsCache.value[i] || getEstimatedCardHeight(i);
+					const cardHeight = cardHeightsCache.value[i];
 					newColumnHeights[columnIndex] = Math.max(
 						newColumnHeights[columnIndex],
 						position.y + cardHeight + gap
@@ -639,7 +1000,8 @@
 
 		// 如果列高度缓存不存在或列数发生变化，重新初始化
 		if (columnHeights.value.length !== columnCount) {
-			columnHeights.value = new Array(columnCount).fill(0);
+			// 初始化所有列高度为顶部间距，确保第一行卡片也有顶部间距
+			columnHeights.value = new Array(columnCount).fill(topGap);
 
 			// 重新计算之前所有卡片对列高度的贡献
 			for (let i = 0; i < index; i++) {
@@ -649,8 +1011,7 @@
 					const columnIndex = Math.round(position.x / (cardWidth + gap));
 					// 确保列索引有效
 					if (columnIndex >= 0 && columnIndex < columnCount) {
-						const cardHeight =
-							cardHeightsCache.value[i] || getEstimatedCardHeight(i);
+						const cardHeight = cardHeightsCache.value[i];
 						columnHeights.value[columnIndex] = Math.max(
 							columnHeights.value[columnIndex],
 							position.y + cardHeight + gap
@@ -688,7 +1049,7 @@
 			cardHeightsCache.value[index] = cardHeight;
 		}
 
-		// 更新列高度
+		// 更新列高度：当前位置 + 卡片高度 + 间距
 		columnHeights.value[shortestColumnIndex] = y + cardHeight + gap;
 
 		updateTotalHeight();
@@ -711,7 +1072,8 @@
 		}
 
 		updateTotalHeight();
-		// 🔥 新增：布局完成后检查是否需要加载更多
+
+		// 布局完成后检查是否需要加载更多
 		setTimeout(() => {
 			checkIfNeedLoadMore();
 		}, 100);
@@ -720,7 +1082,34 @@
 	// 更新总高度
 	const updateTotalHeight = () => {
 		if (columnHeights.value.length === 0) return;
-		totalContentHeight.value = Math.max(...columnHeights.value);
+		// 总高度 = 最高列的高度 + 底部间距
+		totalContentHeight.value = Math.max(...columnHeights.value) + gap;
+	};
+
+	// 分析实际高度组成
+	const analyzeActualHeight = (cardEl: HTMLElement, index: number) => {
+		const card = displayCards.value[index];
+		if (!card) return;
+
+		// 获取各部分的实际高度
+		const imageContainer = cardEl.querySelector(
+			".relative > div"
+		) as HTMLElement;
+		const contentContainer = cardEl.querySelector(".p-3") as HTMLElement;
+		const titleEl = contentContainer?.querySelector(".text-sm") as HTMLElement;
+		const categoryEl = contentContainer?.querySelector(".mt-2") as HTMLElement;
+		const userInfoEl = contentContainer?.querySelector(".mt-3") as HTMLElement;
+
+		const breakdown = {
+			total: cardEl.offsetHeight,
+			image: imageContainer?.offsetHeight || 0,
+			content: contentContainer?.offsetHeight || 0,
+			title: titleEl?.offsetHeight || 0,
+			category: categoryEl?.offsetHeight || 0,
+			userInfo: userInfoEl?.offsetHeight || 0,
+		};
+
+		return breakdown;
 	};
 
 	// 图片加载完成后更新高度（现在主要用于验证预估准确性）
@@ -733,14 +1122,20 @@
 			if (cardEl) {
 				const actualHeight = cardEl.offsetHeight;
 				const estimatedHeight = cardHeightsCache.value[index];
+				const diff = Math.abs(actualHeight - estimatedHeight);
 
-				// 由于使用了API尺寸，预估应该更准确，只在差异很大时才重新计算
-				if (Math.abs(actualHeight - estimatedHeight) > 15) {
-					console.log(
-						`Image loaded - Card ${index}: estimated ${estimatedHeight}px, actual ${actualHeight}px`
-					);
+				// 分析前3个卡片的高度组成
+				if (index < 3) {
+					analyzeActualHeight(cardEl, index);
+				}
+
+				// 🎯 优化：使用智能局部更新替代全量重新计算
+				if (diff > 15) {
+					// 更新实际高度
 					cardHeightsCache.value[index] = actualHeight;
-					recalculateFromIndex(index + 1);
+
+					// 🚀 关键优化：只更新受影响的卡片，而不是重新计算所有
+					updateAffectedCardsOnly(index, diff);
 				} else {
 					cardHeightsCache.value[index] = actualHeight;
 					updateTotalHeight();
@@ -751,14 +1146,57 @@
 		}, 10);
 	};
 
+	// 🚀 新增：智能局部更新函数
+	const updateAffectedCardsOnly = (
+		changedIndex: number,
+		heightDiff: number
+	) => {
+		const changedPosition = cardPositionsCache.value[changedIndex];
+		if (!changedPosition) return;
+
+		// 计算受影响的列
+		const changedColumn = Math.round(
+			changedPosition.x / (getCardWidth() + gap)
+		);
+
+		// 更新该列的高度
+		columnHeights.value[changedColumn] += heightDiff;
+
+		// 🎯 关键：只调整同列且位置在后面的卡片
+		let affectedCount = 0;
+		for (let i = changedIndex + 1; i < displayCards.value.length; i++) {
+			const position = cardPositionsCache.value[i];
+			if (position) {
+				const cardColumn = Math.round(position.x / (getCardWidth() + gap));
+
+				// 只调整同列且Y坐标大于修正点的卡片
+				if (cardColumn === changedColumn && position.y > changedPosition.y) {
+					position.y += heightDiff;
+					cardPositionsCache.value[i] = { ...position };
+					affectedCount++;
+				}
+			}
+		}
+
+		updateTotalHeight();
+	};
+
 	// 防抖的窗口大小变化处理
 	const debouncedResize = debounce(() => {
-		viewportHeight.value = window.innerHeight;
-		layoutCards(); // 窗口大小变化时重新计算所有位置
+		if (import.meta.client) {
+			viewportHeight.value = window.innerHeight;
+			layoutCards(); // 窗口大小变化时重新计算所有位置
+		}
 	}, 300);
 	// 检查是否需要加载更多数据（独立函数）
 	const checkIfNeedLoadMore = async () => {
-		if (isLoadingMore.value || !hasMore.value || isRefreshing.value) return;
+		if (
+			isLoadingMore.value ||
+			!hasMore.value ||
+			isRefreshing.value ||
+			!import.meta.client
+		)
+			return;
 
 		await nextTick(); // 等待DOM更新
 
@@ -769,22 +1207,38 @@
 
 		// 情况1: 内容高度不足填满屏幕（无滚动条）
 		if (documentHeight <= windowHeight + 50) {
-			console.log("📱 Content height insufficient, auto-loading more...");
 			loadMore();
 			return;
 		}
 
 		// 情况2: 有滚动条且接近底部
 		if (currentScrollTop + windowHeight >= documentHeight - 100) {
-			console.log("🔄 Near bottom, loading more...");
 			loadMore();
 		}
 	};
-	// 更新滚动位置
-
+	// 更新滚动位置（防抖处理）
 	const updateScrollTop = () => {
-		scrollTop.value = window.pageYOffset || document.documentElement.scrollTop;
+		if (import.meta.client) {
+			scrollTop.value =
+				window.pageYOffset || document.documentElement.scrollTop;
+		}
+	};
+
+	// 防抖的滚动处理
+	const debouncedScrollHandler = debounce(() => {
+		updateScrollTop();
 		checkIfNeedLoadMore();
+	}, 16); // 约60fps
+
+	// 立即更新滚动位置（用于虚拟列表），延迟处理其他逻辑
+	const handleScroll = () => {
+		if (import.meta.client) {
+			// 立即更新滚动位置，确保虚拟列表响应及时
+			scrollTop.value =
+				window.pageYOffset || document.documentElement.scrollTop;
+			// 延迟处理其他逻辑
+			debouncedScrollHandler();
+		}
 	};
 
 	// 加载更多数据
@@ -795,15 +1249,14 @@
 
 		try {
 			const nextPage = currentPage.value + 1;
-			const { data: nextData } = await getList({
+			const { data: nextList } = await getList({
 				start: nextPage,
 				limit,
 				category: category as string | null,
 				like: like as string | null,
 			});
-			console.log(nextData);
-			if (nextData && nextData && nextData.length > 0) {
-				const newCards = transformApiData(nextData);
+			if (nextList && nextList && nextList.length > 0) {
+				const newCards = transformApiData(nextList);
 				const oldLength = allCards.value.length;
 				allCards.value.push(...newCards);
 				currentPage.value = nextPage;
@@ -829,14 +1282,14 @@
 		isRefreshing.value = true;
 
 		try {
-			const { data: refreshData } = await getList({
+			const { data: refreshList } = await getList({
 				start,
 				limit,
 				category: category as string | null,
 				like: like as string | null,
 			});
 
-			if (refreshData && refreshData) {
+			if (refreshList && refreshList) {
 				// 重置状态
 				currentPage.value = 1;
 				hasMore.value = true;
@@ -850,7 +1303,7 @@
 				totalContentHeight.value = 0;
 
 				// 更新数据
-				allCards.value = transformApiData(refreshData);
+				allCards.value = transformApiData(refreshList);
 
 				// 重新初始化图片宽高比和计算位置
 				displayCards.value.forEach((card, index) => {
@@ -871,7 +1324,7 @@
 
 	// 触摸事件处理 - 修改逻辑，只有下滑时才显示
 	const onTouchStart = (e: TouchEvent) => {
-		if (window.pageYOffset === 0) {
+		if (import.meta.client && window.pageYOffset === 0) {
 			startY.value = e.touches[0].clientY;
 			isUserScrolling.value = false;
 		}
@@ -884,11 +1337,16 @@
 		const distance = currentY - startY.value;
 
 		// 只有在页面顶部且向下滑动且距离超过10px时才显示下拉刷新
-		if (distance > 10 && window.pageYOffset === 0 && !isUserScrolling.value) {
+		if (
+			import.meta.client &&
+			distance > 10 &&
+			window.pageYOffset === 0 &&
+			!isUserScrolling.value
+		) {
 			e.preventDefault();
 			showPullRefresh.value = true;
 			pullDistance.value = Math.min(distance, 150);
-		} else if (distance < 0 || window.pageYOffset > 0) {
+		} else if (import.meta.client && (distance < 0 || window.pageYOffset > 0)) {
 			// 向上滑动或不在顶部时隐藏下拉刷新
 			showPullRefresh.value = false;
 			pullDistance.value = 0;
@@ -950,50 +1408,102 @@
 		playingVideos.value[id] = false;
 	};
 
-	onMounted(() => {
-		// 初始化视口高度
-		viewportHeight.value = window.innerHeight;
+	// 客户端初始数据加载
+	const loadInitialData = async () => {
+		if (!import.meta.client) return;
 
-		// 等待容器准备好后再初始化
-		nextTick(() => {
-			if (container.value) {
-				// 先初始化所有卡片的图片宽高比（不立即计算位置）
-				displayCards.value.forEach((card, index) => {
-					if (
-						card.coverWidth &&
-						card.coverHeight &&
-						card.coverWidth > 0 &&
-						card.coverHeight > 0
-					) {
-						const aspectRatio = card.coverWidth / card.coverHeight;
-						imageAspectRatios.value[index] = Math.max(
-							0.1,
-							Math.min(aspectRatio, 10)
-						);
-					} else {
-						imageAspectRatios.value[index] = 1;
-						// 异步预加载图片
-						preloadImageAspectRatio(card.img, index);
-					}
-				});
+		try {
+			isLoadingMore.value = true;
 
-				// 然后统一计算布局
-				layoutCards();
+			const { data: initialList } = await getList({
+				start,
+				limit,
+				category: category as string | null,
+				like: like as string | null,
+			});
 
-				// 最后检查是否需要加载更多
-				setTimeout(() => {
-					checkIfNeedLoadMore();
-				}, 100);
+			if (initialList && initialList && initialList.length > 0) {
+				allCards.value = transformApiData(initialList);
+
+				// 初始化图片宽高比
+				await nextTick();
+				if (container.value) {
+					// 先初始化所有卡片的图片宽高比
+					allCards.value.forEach((card, index) => {
+						if (
+							card.coverWidth &&
+							card.coverHeight &&
+							card.coverWidth > 0 &&
+							card.coverHeight > 0
+						) {
+							const aspectRatio = card.coverWidth / card.coverHeight;
+							imageAspectRatios.value[index] = Math.max(
+								0.1,
+								Math.min(aspectRatio, 10)
+							);
+						} else {
+							imageAspectRatios.value[index] = 1;
+							// 异步预加载图片
+							preloadImageAspectRatio(card.img, index);
+						}
+					});
+
+					// 计算布局
+					layoutCards();
+
+					// 检查是否需要加载更多
+					setTimeout(() => {
+						checkIfNeedLoadMore();
+					}, 100);
+				}
+			} else {
+				hasMore.value = false;
 			}
-		});
+		} catch (error) {
+			console.error("加载初始数据失败:", error);
+			hasMore.value = false;
+		} finally {
+			isLoadingMore.value = false;
+		}
+	};
 
-		window.addEventListener("resize", debouncedResize);
-		window.addEventListener("scroll", updateScrollTop);
+	onMounted(() => {
+		// 只在客户端执行
+		if (import.meta.client) {
+			// 初始化视口高度
+			viewportHeight.value = window.innerHeight;
+
+			// 加载初始数据
+			loadInitialData();
+
+			window.addEventListener("resize", debouncedResize);
+			window.addEventListener("scroll", handleScroll, { passive: true });
+		}
 	});
 
 	onUnmounted(() => {
-		window.removeEventListener("resize", debouncedResize);
-		window.removeEventListener("scroll", updateScrollTop);
+		// 只在客户端执行清理
+		if (import.meta.client) {
+			window.removeEventListener("resize", debouncedResize);
+			window.removeEventListener("scroll", handleScroll);
+
+			// 清理RAF
+			if (rafId) {
+				cancelAnimationFrame(rafId);
+				rafId = null;
+			}
+
+			// 清理批量更新定时器
+			if (batchUpdateTimer) {
+				clearTimeout(batchUpdateTimer);
+				batchUpdateTimer = null;
+			}
+		}
+
+		// 清理缓存（可选，帮助垃圾回收）
+		cardRefs.value.clear();
+		visibleCardsCache.value = [];
+		pendingUpdates.value.clear();
 	});
 </script>
 
